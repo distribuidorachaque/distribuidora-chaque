@@ -1697,7 +1697,6 @@ function renderVistaClientes() {
       <div class="tipo-tabs">
         <button class="tipo-tab" onclick="abrirFormCliente(null)">+ Nuevo</button>
         <button id="btnGuardarAhora" class="tipo-tab" onclick="guardarAhora()">☁️ Guardar</button>
-        <button class="tipo-tab" onclick="setVista('carga-masiva')" title="Cargar varios clientes de una">📋 Masiva</button>
         <button class="tipo-tab" onclick="forzarRecargaDrive()" title="Recargar desde Google Drive">🔄 Recargar</button>
       </div>
     </div>
