@@ -1582,6 +1582,7 @@ function renderApp() {
     case "lista-precios": renderVistaListaPrecios(); break;
     case "backup":      renderVistaBackup();      break;
     case "carga-masiva": renderVistaCargaMasiva(); break;
+    case "inactivos":   renderVistaInactivos();   break;
   }
 }
 
@@ -1701,6 +1702,17 @@ function renderVistaClientes() {
       </div>
     </div>
 
+    ${contarClientesInactivos() > 0 ? `
+    <div class="form-card" style="cursor:pointer; border-left:4px solid #dc2626;" onclick="setVista('inactivos')">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <strong>⏰ ${contarClientesInactivos()} cliente${contarClientesInactivos() > 1 ? "s" : ""} sin comprarte hace ${DIAS_INACTIVIDAD_UMBRAL}+ días</strong>
+          <div class="muted" style="font-size:13px;">Tocá para ver la lista</div>
+        </div>
+        <span>›</span>
+      </div>
+    </div>` : ""}
+
     <div class="search-box">
       <input id="inputBusquedaCliente" type="text" placeholder="🔍 Buscar por nombre, dirección o teléfono" value="${busquedaCliente}" oninput="buscarClientes(this.value)" />
       ${busquedaCliente ? `<button class="search-clear" onclick="buscarClientes('')">✕</button>` : ""}
@@ -1756,6 +1768,46 @@ const sinComprar = dias !== null && dias >= DIAS_INACTIVIDAD_UMBRAL;
             `;
           }).join("")}
     </div>
+  `;
+}
+
+// ── Vista: CLIENTES INACTIVOS ─────────────────────────────────────────────────
+function renderVistaInactivos() {
+  const cont = document.getElementById("vista-contenido");
+  if (!cont) return;
+
+  const inactivos = clients
+    .filter(c => !c.eliminado && !c.potencial)
+    .map(c => ({ ...c, dias: diasSinComprar(c.id) }))
+    .filter(c => c.dias !== null && c.dias >= DIAS_INACTIVIDAD_UMBRAL)
+    .sort((a, b) => b.dias - a.dias);
+
+  cont.innerHTML = `
+    <div class="page-header">
+      <button class="btn-back" onclick="setVista('clientes')">← Volver</button>
+      <h2 class="page-title2">⏰ Clientes inactivos</h2>
+    </div>
+
+    ${inactivos.length === 0
+      ? `<div class="empty-state">🎉 No tenés clientes hace ${DIAS_INACTIVIDAD_UMBRAL} días o más sin comprarte.</div>`
+      : `
+        <p class="muted" style="margin:0 0 10px;">${inactivos.length} cliente${inactivos.length > 1 ? "s" : ""} hace ${DIAS_INACTIVIDAD_UMBRAL} días o más sin comprarte, ordenados de más a menos tiempo.</p>
+        ${inactivos.map(c => `
+          <div class="client-item" onclick="abrirModalCliente('${c.id}')">
+            <div class="client-tipo-dot tipo-${(c.tipo || 'Otro').toLowerCase().replace('é','e').replace('ú','u')}"></div>
+            <div class="client-info">
+              <div class="client-name">
+                ${c.nombre}
+                <span class="badge-sin-comprar">⏰ ${c.dias}d</span>
+              </div>
+              <div class="client-sub">${c.tipo || "Otro"}${c.telefono ? " · " + c.telefono : ""}</div>
+            </div>
+            ${c.telefono ? `<button class="btn-recordatorio" onclick="event.stopPropagation(); abrirWhatsAppCliente('${c.id}')" title="Escribirle por WhatsApp">💬</button>` : ''}
+            <span class="client-arrow">›</span>
+          </div>
+        `).join("")}
+      `
+    }
   `;
 }
 
