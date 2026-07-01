@@ -1378,6 +1378,40 @@ function enviarConfirmacionPago(id) {
   window.open(url, "_blank");
 }
 
+// ── Impresión de remito en impresora térmica Bluetooth (vía RawBT) ─────────
+// RawBT es una app gratis de Android que hace de "puente" entre el navegador
+// y la impresora Bluetooth (la mayoría de las térmicas chinas no se pueden
+// conectar directo desde un sitio web). Hace falta tenerla instalada y la
+// impresora ya emparejada y elegida adentro de RawBT para que esto funcione.
+function imprimirRemito(id) {
+  const order = orders.find(o => o.id === id);
+  if (!order) return;
+
+  const modo = order.modoPrecio === "con" ? "con" : "sin";
+  let texto = "";
+  texto += "DISTRIBUIDORA CHAQUE\n";
+  texto += "--------------------------------\n";
+  texto += `Cliente: ${order.client.nombre}\n`;
+  texto += `Fecha: ${order.fecha}\n`;
+  texto += "--------------------------------\n";
+
+  order.items.forEach(i => {
+    const precio = modo === "con" ? i.precioVentaConIVA : i.precioVentaSinIVA;
+    const subtotal = modo === "con" ? i.subtotalConIVA : i.subtotalSinIVA;
+    texto += `${i.cantidad} x ${i.nombre}\n`;
+    texto += `   ${formatCurrency(precio)} c/u = ${formatCurrency(subtotal)}\n`;
+  });
+
+  texto += "--------------------------------\n";
+  const total = modo === "con" ? order.totals.totalConIVA : order.totals.totalSinIVA;
+  texto += `TOTAL: ${formatCurrency(total)}\n`;
+  if (order.notas) texto += `\nNotas: ${order.notas}\n`;
+  texto += "\n¡Gracias por su compra!\n\n\n";
+
+  const textoCodificado = encodeURI(texto);
+  window.location.href = "intent:" + textoCodificado + "#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;";
+}
+
 function toggleFormPrecio(id) {
   const form = document.getElementById("form-precio-" + id);
   if (!form) return;
@@ -1999,6 +2033,7 @@ function renderVistaHistorial() {
               <button class="btn-sm btn-outline" onclick="editarPedido('${order.id}')">✏️ Editar</button>
               <button class="btn-sm btn-outline" onclick="enviarWhatsAppPedidoGuardado('${order.id}')">📱 WA</button>
               <button class="btn-sm btn-outline" onclick="generarPDFPedidoGuardado('${order.id}')">📄 PDF</button>
+              <button class="btn-sm btn-outline" onclick="imprimirRemito('${order.id}')">🖨️ Remito</button>
               <button class="btn-sm btn-danger" onclick="eliminarPedido('${order.id}')">🗑️</button>
             </div>
           </div>`;
