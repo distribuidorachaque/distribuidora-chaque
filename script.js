@@ -81,6 +81,7 @@ const STORAGE_KEYS = {
 };
 const TIPOS_CLIENTE = ["Farmacia", "Dietética", "Supermercado", "Verdulería", "Kiosco", "Gimnasio", "Otro"];
 const DIAS_VISITA = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"];
+const HORARIOS_CLIENTE = ["Mañana", "Tarde", "Todo el día"];
 
 function generarId() {
   return "id-" + Date.now() + "-" + Math.floor(Math.random() * 100000);
@@ -449,7 +450,7 @@ function abrirModalCliente(id) {
 
   document.getElementById("modalClienteNombre").textContent = client.nombre;
   document.getElementById("modalClienteInfo").textContent =
-    [client.tipo || "Otro", client.telefono, client.direccion].filter(Boolean).join(" · ");
+    [client.tipo || "Otro", client.horario ? "🕐 " + client.horario : "", client.telefono, client.direccion].filter(Boolean).join(" · ");
 
   document.getElementById("modalCliente").style.display = "flex";
 }
@@ -646,6 +647,7 @@ function guardarCliente() {
   const nombre     = document.getElementById("formClienteNombre").value.trim();
   const tipo       = document.getElementById("formClienteTipo").value;
   const diaVisita  = document.getElementById("formClienteDia")?.value || "";
+  const horario    = document.getElementById("formClienteHorario")?.value || "";
   const telefono   = document.getElementById("formClienteTelefono").value.trim();
   const email      = document.getElementById("formClienteEmail").value.trim();
   const direccion  = document.getElementById("formClienteDireccion").value.trim();
@@ -661,9 +663,9 @@ function guardarCliente() {
 
   if (editandoClienteId) {
     const c = clients.find(c => c.id === editandoClienteId);
-    if (c) Object.assign(c, { nombre, tipo, diaVisita, telefono, email, direccion, potencial, seguimiento, lat, lng, actualizadoEn: Date.now() });
+    if (c) Object.assign(c, { nombre, tipo, diaVisita, horario, telefono, email, direccion, potencial, seguimiento, lat, lng, actualizadoEn: Date.now() });
   } else {
-    clients.unshift({ id: generarId(), nombre, tipo, diaVisita, telefono, email, direccion, notas: "", potencial, seguimiento, lat, lng, actualizadoEn: Date.now() });
+    clients.unshift({ id: generarId(), nombre, tipo, diaVisita, horario, telefono, email, direccion, notas: "", potencial, seguimiento, lat, lng, actualizadoEn: Date.now() });
   }
 
   guardarStorage();
@@ -1523,6 +1525,10 @@ function renderApp() {
             <span class="modal-icon">📍</span>
             <span>Cómo llegar</span>
           </button>
+          <button class="modal-btn" onclick="marcarVisitado()">
+            <span class="modal-icon">👋</span>
+            <span>Visitado hoy</span>
+          </button>
           <button class="modal-btn modal-btn-danger" onclick="confirmarEliminarCliente()">
             <span class="modal-icon">🗑️</span>
             <span>Eliminar</span>
@@ -1596,8 +1602,8 @@ function contarClientesInactivos() {
 }
 
 function diasSinComprar(clienteId) {
+  const c = clients.find(x => x.id === clienteId);
   const pedidosCliente = orders.filter(o => o.client.id === clienteId && !o.borrador && !o.eliminado);
-  if (pedidosCliente.length === 0) return null;
 
   let fechaUltimo = null;
   pedidosCliente.forEach(o => {
@@ -1606,10 +1612,31 @@ function diasSinComprar(clienteId) {
     if (!fechaUltimo || f > fechaUltimo) fechaUltimo = f;
   });
 
+  // Si lo visité y todavía tenía mercadería, la visita cuenta como contacto
+  // y el contador arranca de nuevo desde ese día.
+  if (c && c.ultimaVisita) {
+    const fv = new Date(c.ultimaVisita + "T00:00:00");
+    if (!fechaUltimo || fv > fechaUltimo) fechaUltimo = fv;
+  }
+
+  if (!fechaUltimo) return null;
+
   const hoy = new Date();
   hoy.setHours(0, 0, 0, 0);
   const diff = Math.floor((hoy - fechaUltimo) / (1000 * 60 * 60 * 24));
   return diff;
+}
+
+// ── Marcar visita sin compra (resetea el contador de inactividad) ────────────
+function marcarVisitado() {
+  const c = clients.find(x => x.id === clienteActivoId);
+  if (!c) return;
+  c.ultimaVisita = fechaHoyLocal();
+  c.actualizadoEn = Date.now();
+  guardarStorage();
+  cerrarModal();
+  renderApp();
+  alert("👋 Listo. El contador de " + c.nombre + " arranca de nuevo desde hoy.");
 }
 
 // ── Vista: CARGA MASIVA DE CLIENTES ───────────────────────────────────────────
@@ -1760,7 +1787,7 @@ const sinComprar = dias !== null && dias >= DIAS_INACTIVIDAD_UMBRAL;
                    ${sinComprar && !c.potencial ? ` <span class="badge-sin-comprar">⏰ ${dias}d</span>` : ''}
                     ${badgeSeguimiento}
                   </div>
-                  <div class="client-sub">${c.tipo || "Otro"}${c.telefono ? " · " + c.telefono : ""}${pedidosCliente > 0 ? " · " + pedidosCliente + " pedido" + (pedidosCliente > 1 ? "s" : "") : ""}${c.potencial ? " · Potencial" : ""}</div>
+                  <div class="client-sub">${c.tipo || "Otro"}${c.horario ? " · 🕐 " + c.horario : ""}${c.telefono ? " · " + c.telefono : ""}${pedidosCliente > 0 ? " · " + pedidosCliente + " pedido" + (pedidosCliente > 1 ? "s" : "") : ""}${c.potencial ? " · Potencial" : ""}</div>
                 </div>
                 ${c.telefono ? `<button class="btn-recordatorio" onclick="event.stopPropagation(); abrirWhatsAppCliente('${c.id}')" title="Escribirle por WhatsApp">💬</button>` : ''}
                 <span class="client-arrow">›</span>
@@ -1800,7 +1827,7 @@ function renderVistaInactivos() {
                 ${c.nombre}
                 <span class="badge-sin-comprar">⏰ ${c.dias}d</span>
               </div>
-              <div class="client-sub">${c.tipo || "Otro"}${c.telefono ? " · " + c.telefono : ""}</div>
+              <div class="client-sub">${c.tipo || "Otro"}${c.horario ? " · 🕐 " + c.horario : ""}${c.telefono ? " · " + c.telefono : ""}</div>
             </div>
             ${c.telefono ? `<button class="btn-recordatorio" onclick="event.stopPropagation(); abrirWhatsAppCliente('${c.id}')" title="Escribirle por WhatsApp">💬</button>` : ''}
             <span class="client-arrow">›</span>
@@ -1839,6 +1866,13 @@ function renderVistaFormCliente() {
         <select id="formClienteDia">
           <option value="" ${!c || !c.diaVisita ? "selected" : ""}>Sin asignar</option>
           ${DIAS_VISITA.map(d => `<option value="${d}" ${c && c.diaVisita === d ? "selected" : ""}>${d}</option>`).join("")}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Horario de visita</label>
+        <select id="formClienteHorario">
+          <option value="" ${!c || !c.horario ? "selected" : ""}>Sin asignar</option>
+          ${HORARIOS_CLIENTE.map(h => `<option value="${h}" ${c && c.horario === h ? "selected" : ""}>${h}</option>`).join("")}
         </select>
       </div>
       <div class="form-group">
