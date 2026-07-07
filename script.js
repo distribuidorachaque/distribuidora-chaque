@@ -833,6 +833,16 @@ function renderPedido() {
   if (document.getElementById("totalCantidad")) document.getElementById("totalCantidad").textContent = tCant;
 }
 
+// ── Si un potencial compra, deja de ser potencial automáticamente ────────────
+function promoverPotencial(clienteId) {
+  const c = clients.find(x => x.id === clienteId);
+  if (c && c.potencial) {
+    c.potencial = false;
+    c.seguimiento = "";
+    c.actualizadoEn = Date.now();
+  }
+}
+
 function guardarPedido() {
   const client = clients.find(c => c.id === clienteActivoId);
   if (!client) return alert("No hay cliente seleccionado");
@@ -861,6 +871,8 @@ function guardarPedido() {
     actualizadoEn: Date.now(),
     totals: { totalSinIVA: tSin, totalConIVA: tCon, totalCantidad: tCant }
   });
+
+  if (!modoBorrador) promoverPotencial(client.id);
 
   guardarStorage();
   currentItems   = [];
@@ -933,6 +945,7 @@ function confirmarEntrega(orderId) {
   }
   aplicarStock(order.items, -1);
   order.borrador = false;
+  promoverPotencial(order.client.id);
   guardarStorage();
   renderVistaHistorial();
 }
