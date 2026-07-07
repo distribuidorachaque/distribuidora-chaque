@@ -450,7 +450,7 @@ function abrirModalCliente(id) {
 
   document.getElementById("modalClienteNombre").textContent = client.nombre;
   document.getElementById("modalClienteInfo").textContent =
-    [client.tipo || "Otro", client.horario ? "🕐 " + client.horario : "", client.telefono, client.direccion].filter(Boolean).join(" · ");
+    [client.tipo || "Otro", client.horario ? "🕐 " + client.horario : "", Number(client.frecuencia) === 14 ? "📅 Quincenal" : "📅 Semanal", client.telefono, client.direccion].filter(Boolean).join(" · ");
 
   document.getElementById("modalCliente").style.display = "flex";
 }
@@ -648,6 +648,7 @@ function guardarCliente() {
   const tipo       = document.getElementById("formClienteTipo").value;
   const diaVisita  = document.getElementById("formClienteDia")?.value || "";
   const horario    = document.getElementById("formClienteHorario")?.value || "";
+  const frecuencia = Number(document.getElementById("formClienteFrecuencia")?.value) || 7;
   const telefono   = document.getElementById("formClienteTelefono").value.trim();
   const email      = document.getElementById("formClienteEmail").value.trim();
   const direccion  = document.getElementById("formClienteDireccion").value.trim();
@@ -663,9 +664,9 @@ function guardarCliente() {
 
   if (editandoClienteId) {
     const c = clients.find(c => c.id === editandoClienteId);
-    if (c) Object.assign(c, { nombre, tipo, diaVisita, horario, telefono, email, direccion, potencial, seguimiento, lat, lng, actualizadoEn: Date.now() });
+    if (c) Object.assign(c, { nombre, tipo, diaVisita, horario, frecuencia, telefono, email, direccion, potencial, seguimiento, lat, lng, actualizadoEn: Date.now() });
   } else {
-    clients.unshift({ id: generarId(), nombre, tipo, diaVisita, horario, telefono, email, direccion, notas: "", potencial, seguimiento, lat, lng, actualizadoEn: Date.now() });
+    clients.unshift({ id: generarId(), nombre, tipo, diaVisita, horario, frecuencia, telefono, email, direccion, notas: "", potencial, seguimiento, lat, lng, actualizadoEn: Date.now() });
   }
 
   guardarStorage();
@@ -751,7 +752,8 @@ function agregarItem() {
   const prod = catalog.find(p => p.id === productId);
   if (!prod) return alert("Seleccioná un producto");
 
-  const cantidad = Math.max(1, Number(document.getElementById("cantidad").value || 1));
+  const cantidad = Number(document.getElementById("cantidad").value);
+  if (!cantidad || cantidad < 1) return alert("Poné la cantidad antes de agregar");
   if (!modoBorrador && cantidad > getDisponibleParaAgregar(productId)) return alert(`Stock insuficiente. Disponible: ${getDisponibleParaAgregar(productId)}`);
 
   const pSin = getPrecioConDescuento();
@@ -764,7 +766,15 @@ function agregarItem() {
   });
 
   renderPedido();
-  autocompletarProducto();
+
+  // Limpiar todo para el próximo producto: así apretar "Agregar" de nuevo
+  // no vuelve a cargar el mismo ítem por accidente.
+  const prodSelect = document.getElementById("productoSelect");
+  if (prodSelect) prodSelect.value = "";
+  const precioInput = document.getElementById("precioVenta");
+  if (precioInput) precioInput.value = "";
+  const info = document.getElementById("infoPrecioProducto");
+  if (info) info.innerHTML = "";
   const cantInput = document.getElementById("cantidad");
   if (cantInput) cantInput.value = "";
   const descInput = document.getElementById("descuentoPct");
@@ -1606,11 +1616,17 @@ function renderApp() {
 }
 
 // ── Vista: CLIENTES ───────────────────────────────────────────────────────────
+// Umbral de inactividad según la frecuencia de visita de cada cliente
+// (7 = semanal, 14 = quincenal). Si no tiene, usa el umbral general.
+function umbralInactividad(c) {
+  return Number(c && c.frecuencia) || DIAS_INACTIVIDAD_UMBRAL;
+}
+
 function contarClientesInactivos() {
   return clients.filter(c => {
     if (c.eliminado || c.potencial) return false;
     const dias = diasSinComprar(c.id);
-    return dias !== null && dias >= DIAS_INACTIVIDAD_UMBRAL;
+    return dias !== null && dias >= umbralInactividad(c);
   }).length;
 }
 
@@ -1778,7 +1794,7 @@ function renderVistaClientes() {
             const tieneDeuda = clienteTieneDeuda(c.id);
             const montoDeuda = deudaTotalCliente(c.id);
             const dias = diasSinComprar(c.id);
-const sinComprar = dias !== null && dias >= DIAS_INACTIVIDAD_UMBRAL;
+const sinComprar = dias !== null && dias >= umbralInactividad(c);
 
             // Seguimiento para potenciales
             let badgeSeguimiento = "";
@@ -1819,7 +1835,7 @@ function renderVistaInactivos() {
   const inactivos = clients
     .filter(c => !c.eliminado && !c.potencial)
     .map(c => ({ ...c, dias: diasSinComprar(c.id) }))
-    .filter(c => c.dias !== null && c.dias >= DIAS_INACTIVIDAD_UMBRAL)
+    .filter(c => c.dias !== null && c.dias >= umbralInactividad(c))
     .sort((a, b) => b.dias - a.dias);
 
   cont.innerHTML = `
@@ -1829,9 +1845,9 @@ function renderVistaInactivos() {
     </div>
 
     ${inactivos.length === 0
-      ? `<div class="empty-state">🎉 No tenés clientes hace ${DIAS_INACTIVIDAD_UMBRAL} días o más sin comprarte.</div>`
+      ? `<div class="empty-state">🎉 No tenés clientes que hayan pasado su frecuencia de visita sin comprarte.</div>`
       : `
-        <p class="muted" style="margin:0 0 10px;">${inactivos.length} cliente${inactivos.length > 1 ? "s" : ""} hace ${DIAS_INACTIVIDAD_UMBRAL} días o más sin comprarte, ordenados de más a menos tiempo.</p>
+        <p class="muted" style="margin:0 0 10px;">${inactivos.length} cliente${inactivos.length > 1 ? "s" : ""} pasaron su frecuencia de visita (7 o 14 días) sin comprarte, ordenados de más a menos tiempo.</p>
         ${inactivos.map(c => `
           <div class="client-item" onclick="abrirModalCliente('${c.id}')">
             <div class="client-tipo-dot tipo-${(c.tipo || 'Otro').toLowerCase().replace('é','e').replace('ú','u')}"></div>
@@ -1886,6 +1902,13 @@ function renderVistaFormCliente() {
         <select id="formClienteHorario">
           <option value="" ${!c || !c.horario ? "selected" : ""}>Sin asignar</option>
           ${HORARIOS_CLIENTE.map(h => `<option value="${h}" ${c && c.horario === h ? "selected" : ""}>${h}</option>`).join("")}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Frecuencia de visita</label>
+        <select id="formClienteFrecuencia">
+          <option value="7" ${!c || Number(c.frecuencia) !== 14 ? "selected" : ""}>Semanal (cada 7 días)</option>
+          <option value="14" ${c && Number(c.frecuencia) === 14 ? "selected" : ""}>Quincenal (cada 14 días)</option>
         </select>
       </div>
       <div class="form-group">
@@ -2047,6 +2070,12 @@ function renderVistaPedido() {
 }
 
 // ── Vista: HISTORIAL ──────────────────────────────────────────────────────────
+// ── Volver a la ficha del cliente activo (en vez de perderse en la lista) ────
+function volverAlCliente() {
+  setVista("clientes");
+  if (clienteActivoId) abrirModalCliente(clienteActivoId);
+}
+
 function renderVistaHistorial() {
   const cont   = document.getElementById("vista-contenido");
   if (!cont) return;
@@ -2058,7 +2087,7 @@ function renderVistaHistorial() {
 
   cont.innerHTML = `
     <div class="page-header">
-      ${client ? `<button class="btn-back" onclick="setVista('clientes')">← Volver</button>` : ""}
+      ${client ? `<button class="btn-back" onclick="volverAlCliente()">← Volver</button>` : ""}
       <h2 class="page-title2">${client ? "Pedidos de " + client.nombre : "Todos los pedidos"}</h2>
     </div>
 
