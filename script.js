@@ -1622,9 +1622,15 @@ function umbralInactividad(c) {
   return Number(c && c.frecuencia) || DIAS_INACTIVIDAD_UMBRAL;
 }
 
+// Solo los clientes "de ruta" cuentan para inactividad: los potenciales no,
+// y los de tipo "Otro" (familia, amigos) tampoco.
+function cuentaInactividad(c) {
+  return c && !c.potencial && (c.tipo || "Otro") !== "Otro";
+}
+
 function contarClientesInactivos() {
   return clients.filter(c => {
-    if (c.eliminado || c.potencial) return false;
+    if (c.eliminado || !cuentaInactividad(c)) return false;
     const dias = diasSinComprar(c.id);
     return dias !== null && dias >= umbralInactividad(c);
   }).length;
@@ -1794,7 +1800,7 @@ function renderVistaClientes() {
             const tieneDeuda = clienteTieneDeuda(c.id);
             const montoDeuda = deudaTotalCliente(c.id);
             const dias = diasSinComprar(c.id);
-const sinComprar = dias !== null && dias >= umbralInactividad(c);
+const sinComprar = cuentaInactividad(c) && dias !== null && dias >= umbralInactividad(c);
 
             // Seguimiento para potenciales
             let badgeSeguimiento = "";
@@ -1833,7 +1839,7 @@ function renderVistaInactivos() {
   if (!cont) return;
 
   const inactivos = clients
-    .filter(c => !c.eliminado && !c.potencial)
+    .filter(c => !c.eliminado && cuentaInactividad(c))
     .map(c => ({ ...c, dias: diasSinComprar(c.id) }))
     .filter(c => c.dias !== null && c.dias >= umbralInactividad(c))
     .sort((a, b) => b.dias - a.dias);
@@ -2352,7 +2358,7 @@ function renderVistaResumen() {
         </div>
         <div class="stat-box">
   <div class="muted">Clientes</div>
-  <strong>${clients.filter(c => !c.eliminado).length}</strong>
+  <strong>${clients.filter(c => !c.eliminado && (c.tipo || "Otro") !== "Otro").length}</strong>
 </div>
         <div class="stat-box">
           <div class="muted">Borradores</div>
@@ -2941,7 +2947,7 @@ function renderVistaBackup() {
     <div class="form-card">
       <h3 class="section-title">Resumen</h3>
       <div class="stats-grid">
-       <div class="stat-box"><div class="muted">Clientes</div><strong>${clients.filter(c => !c.eliminado).length}</strong></div>
+       <div class="stat-box"><div class="muted">Clientes</div><strong>${clients.filter(c => !c.eliminado && (c.tipo || "Otro") !== "Otro").length}</strong></div>
         <div class="stat-box"><div class="muted">Pedidos</div><strong>${orders.length}</strong></div>
         <div class="stat-box"><div class="muted">Productos</div><strong>${catalog.length}</strong></div>
         <div class="stat-box"><div class="muted">Total ventas</div><strong style="font-size:14px;">${formatCurrency(totalVentas)}</strong></div>
