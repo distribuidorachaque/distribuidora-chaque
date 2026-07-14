@@ -1347,8 +1347,11 @@ function construirMensajeWhatsApp(order, modo) {
     const precioUnit = modo === "con" ? i.precioVentaConIVA : i.precioVentaSinIVA;
     const subtotal   = modo === "con" ? i.subtotalConIVA    : i.subtotalSinIVA;
     const esBlister12 = BLISTER_12.includes(i.nombre) && i.categoria === "Vita";
-    const xUnidad = esBlister12 ? ` (${formatCurrency(precioUnit / 12)} c/u)` : "";
-    msg += `▪️ ${i.nombre}\n   ${i.cantidad} u x ${formatCurrency(precioUnit)}${xUnidad} = ${formatCurrency(subtotal)}\n`;
+    if (esBlister12) {
+      msg += `▪️ ${i.nombre}\n   ${i.cantidad} u x ${formatCurrency(precioUnit)} = ${formatCurrency(precioUnit / 12)} c/u\n`;
+    } else {
+      msg += `▪️ ${i.nombre}\n   ${i.cantidad} u x ${formatCurrency(precioUnit)} = ${formatCurrency(subtotal)}\n`;
+    }
   });
   const total = modo === "con" ? order.totals.totalConIVA : order.totals.totalSinIVA;
   msg += `\n💰 *Total: ${formatCurrency(total)}*`;
@@ -1834,15 +1837,28 @@ const sinComprar = cuentaInactividad(c) && dias !== null && dias >= umbralInacti
 }
 
 // ── Vista: CLIENTES INACTIVOS ─────────────────────────────────────────────────
+let filtroDiaInactivos = "Todos";
+
+function cambiarFiltroDiaInactivos(d) {
+  filtroDiaInactivos = d;
+  renderVistaInactivos();
+}
+
 function renderVistaInactivos() {
   const cont = document.getElementById("vista-contenido");
   if (!cont) return;
 
-  const inactivos = clients
+  const inactivosTodos = clients
     .filter(c => !c.eliminado && cuentaInactividad(c))
     .map(c => ({ ...c, dias: diasSinComprar(c.id) }))
     .filter(c => c.dias !== null && c.dias >= umbralInactividad(c))
     .sort((a, b) => b.dias - a.dias);
+
+  const inactivos = inactivosTodos.filter(c => {
+    if (filtroDiaInactivos === "Todos") return true;
+    if (filtroDiaInactivos === "Sin asignar") return !c.diaVisita;
+    return c.diaVisita === filtroDiaInactivos;
+  });
 
   cont.innerHTML = `
     <div class="page-header">
@@ -1850,10 +1866,18 @@ function renderVistaInactivos() {
       <h2 class="page-title2">⏰ Clientes inactivos</h2>
     </div>
 
+    <div class="tipo-tabs">
+      ${["Todos", ...DIAS_VISITA, "Sin asignar"].map(d => `
+        <button class="tipo-tab ${filtroDiaInactivos === d ? "active" : ""}" onclick="cambiarFiltroDiaInactivos('${d}')">${d}</button>
+      `).join("")}
+    </div>
+
     ${inactivos.length === 0
-      ? `<div class="empty-state">🎉 No tenés clientes que hayan pasado su frecuencia de visita sin comprarte.</div>`
+      ? `<div class="empty-state">${filtroDiaInactivos === "Todos"
+          ? "🎉 No tenés clientes que hayan pasado su frecuencia de visita sin comprarte."
+          : "🎉 No hay clientes inactivos con visita de " + filtroDiaInactivos.toLowerCase() + "."}</div>`
       : `
-        <p class="muted" style="margin:0 0 10px;">${inactivos.length} cliente${inactivos.length > 1 ? "s" : ""} pasaron su frecuencia de visita (7 o 14 días) sin comprarte, ordenados de más a menos tiempo.</p>
+        <p class="muted" style="margin:0 0 10px;">${inactivos.length} cliente${inactivos.length > 1 ? "s" : ""}${filtroDiaInactivos !== "Todos" ? " (" + filtroDiaInactivos + ")" : ""} pasaron su frecuencia de visita (7 o 14 días) sin comprarte, ordenados de más a menos tiempo.</p>
         ${inactivos.map(c => `
           <div class="client-item" onclick="abrirModalCliente('${c.id}')">
             <div class="client-tipo-dot tipo-${(c.tipo || 'Otro').toLowerCase().replace('é','e').replace('ú','u')}"></div>
@@ -1862,7 +1886,7 @@ function renderVistaInactivos() {
                 ${c.nombre}
                 <span class="badge-sin-comprar">⏰ ${c.dias}d</span>
               </div>
-              <div class="client-sub">${c.tipo || "Otro"}${c.horario ? " · 🕐 " + c.horario : ""}${c.telefono ? " · " + c.telefono : ""}</div>
+              <div class="client-sub">${c.tipo || "Otro"}${c.diaVisita ? " · 📆 " + c.diaVisita : ""}${c.horario ? " · 🕐 " + c.horario : ""}${c.telefono ? " · " + c.telefono : ""}</div>
             </div>
             ${c.telefono ? `<button class="btn-recordatorio" onclick="event.stopPropagation(); abrirWhatsAppCliente('${c.id}')" title="Escribirle por WhatsApp">💬</button>` : ''}
             <span class="client-arrow">›</span>
