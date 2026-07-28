@@ -135,6 +135,7 @@ let filtroStock       = "Todas";
 let costosVehiculoAbierto = false;
 let gastosExtraAbierto = false;
 let kmPorMes = JSON.parse(localStorage.getItem("alunexa_km_por_mes_v1") || "{}");
+let metaPorMes = JSON.parse(localStorage.getItem("alunexa_meta_por_mes_v1") || "{}");
 
 function claveMesActual() {
   const hoy = new Date();
@@ -1204,6 +1205,30 @@ async function generarCierreMes() {
 }
 
 
+function guardarMetaMes() {
+  const val = parseNumber(document.getElementById("inputMetaMes")?.value) || 0;
+  metaPorMes[mesResumen] = val;
+  localStorage.setItem("alunexa_meta_por_mes_v1", JSON.stringify(metaPorMes));
+  renderVistaResumen();
+}
+
+// Ventas (sin IVA) de los últimos 6 meses, terminando en el mes/año dado.
+function calcularVentasUltimosMeses(mesFin, anioFin, cantidad) {
+  const resultado = [];
+  for (let i = cantidad - 1; i >= 0; i--) {
+    let m = mesFin - i, a = anioFin;
+    while (m <= 0) { m += 12; a -= 1; }
+    const total = orders.filter(o => {
+      if (o.borrador || o.eliminado) return false;
+      const partes = o.fecha.replace(/,.*/, '').split('/');
+      return parseInt(partes[1]) === m && parseInt(partes[2]) === a;
+    }).reduce((acc, o) => acc + o.totals.totalSinIVA, 0);
+    const nombreMes = new Date(a, m - 1, 1).toLocaleString("es-AR", { month: "short" });
+    resultado.push({ mes: m, anio: a, nombreMes: nombreMes.replace(".", ""), total });
+  }
+  return resultado;
+}
+
 function calcularTopClientes(limite) {
 
   const porCliente = {};
@@ -1215,6 +1240,39 @@ function calcularTopClientes(limite) {
     porCliente[id].pedidos += 1;
   });
   return Object.values(porCliente)
+    .sort((a, b) => b.total - a.total)
+    .slice(0, limite);
+}
+
+// Ranking de clientes y productos de un mes puntual (para el Resumen)
+function calcularTopClientesDelMes(mes, anio, limite) {
+  const porCliente = {};
+  orders.forEach(o => {
+    if (o.borrador || o.eliminado) return;
+    const partes = o.fecha.replace(/,.*/, '').split('/');
+    if (parseInt(partes[1]) !== mes || parseInt(partes[2]) !== anio) return;
+    const id = o.client.id;
+    if (!porCliente[id]) porCliente[id] = { nombre: o.client.nombre, total: 0, pedidos: 0 };
+    porCliente[id].total += o.totals.totalSinIVA;
+    porCliente[id].pedidos += 1;
+  });
+  return Object.values(porCliente).sort((a, b) => b.total - a.total).slice(0, limite);
+}
+
+function calcularTopProductosDelMes(mes, anio, limite) {
+  const porProducto = {};
+  orders.forEach(o => {
+    if (o.borrador || o.eliminado) return;
+    const partes = o.fecha.replace(/,.*/, '').split('/');
+    if (parseInt(partes[1]) !== mes || parseInt(partes[2]) !== anio) return;
+    o.items.forEach(i => {
+      if (!porProducto[i.nombre]) porProducto[i.nombre] = { cantidad: 0, total: 0 };
+      porProducto[i.nombre].cantidad += i.cantidad;
+      porProducto[i.nombre].total += i.subtotalSinIVA;
+    });
+  });
+  return Object.entries(porProducto)
+    .map(([nombre, d]) => ({ nombre, ...d }))
     .sort((a, b) => b.total - a.total)
     .slice(0, limite);
 }
@@ -1610,8 +1668,9 @@ function renderApp() {
         <span class="nav-icon">📊</span><span class="nav-label">Resumen</span>
       </button>
       <button class="nav-btn ${vistaActual === 'stock' ? 'active' : ''}" onclick="abrirStock()">
-        <span class="nav-icon">📦</span><span class="nav-label">Stock</span>
-      </button>
+  <span class="nav-icon">📦</span><span class="nav-label">Stock</span>
+  ${contarStockBajo() > 0 ? `<span class="nav-badge">${contarStockBajo()}</span>` : ''}
+</button>
       <button class="nav-btn ${vistaActual === 'backup' ? 'active' : ''}" onclick="setVista('backup')">
         <span class="nav-icon">💾</span><span class="nav-label">Backup</span>
       </button>
@@ -1652,6 +1711,11 @@ function contarClientesInactivos() {
     const dias = diasSinComprar(c.id);
     return dias !== null && dias >= umbralInactividad(c);
   }).length;
+}
+
+// Cuenta productos agotados o con stock bajo, para la alertita en la barra de abajo
+function contarStockBajo() {
+  return catalog.filter(p => p.stock <= STOCK_BAJO_UMBRAL).length;
 }
 
 function diasSinComprar(clienteId) {
@@ -2429,7 +2493,77 @@ function renderVistaResumen() {
           <strong style="color:#92400e;">${pedidosBorrador}</strong>
         </div>
       </div>
+
+      ${(() => {
+        const meta = metaPorMes[mesResumen] || 0;
+        const pct = meta > 0 ? Math.min(100, Math.round((totalVentas / meta) * 100)) : 0;
+        return `
+        <div style="margin-top:14px; border-top:1px solid #e5e7eb; padding-top:12px;">
+          <div class="row-2">
+            <div class="form-group" style="margin:0;">
+              <label>🎯 Meta de ventas de ${mesResumenCapital}</label>
+              <input id="inputMetaMes" type="number" min="0" placeholder="Ej: 500000" value="${meta || ""}" onchange="guardarMetaMes()" />
+            </div>
+          </div>
+          ${meta > 0 ? `
+            <div style="margin-top:10px; background:#e5e7eb; border-radius:8px; overflow:hidden; height:22px;">
+              <div style="width:${pct}%; background:${pct >= 100 ? '#059669' : '#3b82f6'}; height:100%; transition:width 0.3s;"></div>
+            </div>
+            <p class="muted" style="margin:6px 0 0;">${pct}% de la meta — llevás ${formatCurrency(totalVentas)} de ${formatCurrency(meta)}${pct >= 100 ? " 🎉 ¡Meta cumplida!" : ""}</p>
+          ` : ""}
+        </div>`;
+      })()}
+
+      ${(() => {
+        const serie = calcularVentasUltimosMeses(mesResumenSel, anioResumenSel, 6);
+        const maxVal = Math.max(1, ...serie.map(s => s.total));
+        return `
+        <div style="margin-top:14px; border-top:1px solid #e5e7eb; padding-top:12px;">
+          <div class="muted" style="margin-bottom:8px;">📈 Ventas de los últimos 6 meses</div>
+          <div style="display:flex; align-items:flex-end; gap:8px; height:110px;">
+            ${serie.map(s => `
+              <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%;">
+                <div style="font-size:10px; color:#6b7280; margin-bottom:2px;">${s.total > 0 ? formatCurrency(s.total).replace("$", "").trim() : ""}</div>
+                <div style="width:100%; max-width:34px; background:${s.mes === mesResumenSel && s.anio === anioResumenSel ? '#3b82f6' : '#93c5fd'}; border-radius:4px 4px 0 0; height:${Math.max(4, Math.round((s.total / maxVal) * 80))}px;"></div>
+                <div style="font-size:11px; color:#374151; margin-top:4px;">${s.nombreMes}</div>
+              </div>
+            `).join("")}
+          </div>
+        </div>`;
+      })()}
     </div>
+
+    ${(() => {
+      const topClientesMes = calcularTopClientesDelMes(mesResumenSel, anioResumenSel, 5);
+      const topProductosMes = calcularTopProductosDelMes(mesResumenSel, anioResumenSel, 5);
+      const medallas = ["🥇", "🥈", "🥉", "4.", "5."];
+      if (topClientesMes.length === 0 && topProductosMes.length === 0) return "";
+      return `
+      <div class="form-card">
+        <h3 class="section-title">🏆 Top clientes de ${mesResumenCapital}</h3>
+        ${topClientesMes.length === 0 ? `<p class="muted">Todavía no hay ventas en ${mesResumenCapital}.</p>` : topClientesMes.map((c, i) => `
+          <div class="stock-row">
+            <div>
+              <div class="stock-nombre">${medallas[i]} ${c.nombre}</div>
+              <div class="muted">${c.pedidos} pedido${c.pedidos > 1 ? "s" : ""}</div>
+            </div>
+            <strong>${formatCurrency(c.total)}</strong>
+          </div>
+        `).join("")}
+      </div>
+      <div class="form-card">
+        <h3 class="section-title">📦 Productos más vendidos de ${mesResumenCapital}</h3>
+        ${topProductosMes.length === 0 ? `<p class="muted">Todavía no hay ventas en ${mesResumenCapital}.</p>` : topProductosMes.map((p, i) => `
+          <div class="stock-row">
+            <div>
+              <div class="stock-nombre">${medallas[i]} ${p.nombre}</div>
+              <div class="muted">${p.cantidad} u vendidas</div>
+            </div>
+            <strong>${formatCurrency(p.total)}</strong>
+          </div>
+        `).join("")}
+      </div>`;
+    })()}
 
     ${(() => {
       const top = calcularTopClientes(5);
@@ -2447,6 +2581,18 @@ function renderVistaResumen() {
             <strong>${formatCurrency(c.total)}</strong>
           </div>
         `).join("")}
+      </div>`;
+    })()}
+
+    ${(() => {
+      const bajos = catalog.filter(p => p.stock > 0 && p.stock <= STOCK_BAJO_UMBRAL);
+      const agotados = catalog.filter(p => p.stock === 0);
+      if (bajos.length === 0 && agotados.length === 0) return "";
+      return `
+      <div class="form-card">
+        <h3 class="section-title" style="cursor:pointer;" onclick="abrirStock()">⚠️ Alerta de stock ›</h3>
+        ${agotados.length > 0 ? `<p class="muted" style="margin:4px 0;">⛔ Sin stock: ${agotados.map(p => p.nombre).join(", ")}</p>` : ""}
+        ${bajos.length > 0 ? `<p class="muted" style="margin:4px 0;">⚠️ Stock bajo: ${bajos.map(p => p.nombre + " (" + p.stock + ")").join(", ")}</p>` : ""}
       </div>`;
     })()}
 
@@ -2489,17 +2635,21 @@ function renderVistaResumen() {
             <input id="vehiculoMonto" type="number" min="0" placeholder="Ej: 15000" />
           </div>
           <div class="form-group">
-            <label>Fecha</label>
-            <input id="vehiculoFecha" type="date" value="${fechaHoyLocal()}" />
+            <label>Litros cargados</label>
+            <input id="vehiculoLitros" type="number" min="0" step="0.01" placeholder="Ej: 10" />
           </div>
+        </div>
+        <div class="form-group">
+          <label>Fecha</label>
+          <input id="vehiculoFecha" type="date" value="${fechaHoyLocal()}" />
         </div>
         <button class="btn-primary btn-full" onclick="registrarGastoVehiculo()">+ Registrar</button>
 
         ${gastosMes.length > 0 ? gastosMes.map(i => `
           <div class="stock-row">
             <div>
-              <div class="stock-nombre">${formatCurrency(i.monto)}</div>
-              <div class="muted">${i.fecha}</div>
+              <div class="stock-nombre">${formatCurrency(i.monto)}${i.litros ? " · " + i.litros + " L" : ""}</div>
+              <div class="muted">${i.fecha}${i.litros ? " · " + formatCurrency(i.monto / i.litros) + " x litro" : ""}</div>
             </div>
             <button class="btn-sm btn-outline" onclick="eliminarInversion('${i.id}'); setVista('resumen')">🗑️</button>
           </div>
@@ -2820,6 +2970,7 @@ function registrarGastoExtra() {
 
 function registrarGastoVehiculo() {
   const monto = parseNumber(document.getElementById("vehiculoMonto").value) || 0;
+  const litros = parseNumber(document.getElementById("vehiculoLitros")?.value) || 0;
   const fecha = document.getElementById("vehiculoFecha").value;
   if (monto <= 0) return alert("Ingresá un monto válido");
   if (!fecha) return alert("Elegí una fecha");
@@ -2828,6 +2979,7 @@ function registrarGastoVehiculo() {
     id: generarId(),
     marca: "Combustible",
     monto,
+    litros: litros > 0 ? litros : null,
     fecha,
     nota: "",
     actualizadoEn: Date.now()
@@ -2835,6 +2987,8 @@ function registrarGastoVehiculo() {
 
   guardarStorage();
   document.getElementById("vehiculoMonto").value = "";
+  const litrosInput = document.getElementById("vehiculoLitros");
+  if (litrosInput) litrosInput.value = "";
   renderVistaResumen();
 }
 
