@@ -157,6 +157,31 @@ let configVehiculo = JSON.parse(localStorage.getItem("alunexa_config_vehiculo_v1
   bateriaAnios: 3,
   actualizadoEn: 0
 };
+
+// Los km y la meta de ventas por mes ahora viven adentro de configVehiculo,
+// así viajan a Drive junto con el resto de la config y se ven iguales en
+// el celu y en la compu. Si ya tenías cargados km o metas de antes (guardados
+// solo en este dispositivo), los migramos acá adentro una sola vez.
+if (!configVehiculo.kmPorMes) configVehiculo.kmPorMes = {};
+if (!configVehiculo.metaPorMes) configVehiculo.metaPorMes = {};
+let huboMigracionLocal = false;
+Object.keys(kmPorMes).forEach(k => {
+  if (configVehiculo.kmPorMes[k] === undefined) { configVehiculo.kmPorMes[k] = kmPorMes[k]; huboMigracionLocal = true; }
+});
+Object.keys(metaPorMes).forEach(k => {
+  if (configVehiculo.metaPorMes[k] === undefined) { configVehiculo.metaPorMes[k] = metaPorMes[k]; huboMigracionLocal = true; }
+});
+if (huboMigracionLocal) {
+  configVehiculo.actualizadoEn = Date.now();
+  localStorage.setItem("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
+  fetch(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "vehiculo", payload: [configVehiculo] }) });
+}
+// A partir de acá, kmPorMes y metaPorMes apuntan al mismo objeto que
+// configVehiculo.kmPorMes/.metaPorMes, así que todo el código que ya
+// usaba kmPorMes[mes] y metaPorMes[mes] sigue funcionando igual.
+kmPorMes = configVehiculo.kmPorMes;
+metaPorMes = configVehiculo.metaPorMes;
+
 let marcasListaPrecios = new Set();
 
 // ── Almacenamiento ───────────────────────────────────────────────────────────
@@ -1022,6 +1047,7 @@ function toggleGastosExtra() {
 
 function guardarConfigVehiculo() {
   configVehiculo = {
+    ...configVehiculo, // preserva km y metas ya cargadas, no las pisa
     seguro: parseNumber(document.getElementById("cfgSeguro").value) || 0,
     celular: parseNumber(document.getElementById("cfgCelular").value) || 0,
     monotributo: parseNumber(document.getElementById("cfgMonotributo").value) || 0,
@@ -1036,6 +1062,8 @@ function guardarConfigVehiculo() {
   localStorage.setItem("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
   // La mandamos a Drive para que se vea igual en todos tus dispositivos
   fetch(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "vehiculo", payload: [configVehiculo] }) });
+  kmPorMes = configVehiculo.kmPorMes;
+  metaPorMes = configVehiculo.metaPorMes;
   renderVistaResumen();
 }// Si hay una versión más nueva de la config del vehículo guardada en Drive
 // (por ejemplo, la cargaste desde el celu), la trae y la usa acá también.
@@ -1046,7 +1074,11 @@ async function sincronizarConfigVehiculo() {
     if (filas.length === 0) return;
     const remoto = JSON.parse(filas[0][0]);
     if ((remoto.actualizadoEn || 0) > (configVehiculo.actualizadoEn || 0)) {
+      if (!remoto.kmPorMes) remoto.kmPorMes = {};
+      if (!remoto.metaPorMes) remoto.metaPorMes = {};
       configVehiculo = remoto;
+      kmPorMes = configVehiculo.kmPorMes;
+      metaPorMes = configVehiculo.metaPorMes;
       localStorage.setItem("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
       if (vistaActual === "resumen") renderVistaResumen();
     }
@@ -1221,7 +1253,9 @@ async function generarCierreMes() {
 function guardarMetaMes() {
   const val = parseNumber(document.getElementById("inputMetaMes")?.value) || 0;
   metaPorMes[mesResumen] = val;
-  localStorage.setItem("alunexa_meta_por_mes_v1", JSON.stringify(metaPorMes));
+  configVehiculo.actualizadoEn = Date.now();
+  localStorage.setItem("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
+  fetch(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "vehiculo", payload: [configVehiculo] }) });
   renderVistaResumen();
 }
 
@@ -2813,6 +2847,26 @@ function renderVistaResumen() {
       </div>
 
       <div class="form-card">
+        <h3 class="section-title">💰 Ganancia neta de ${mesResumenCapital}</h3>
+        <p class="muted" style="margin:0 0 10px;">Lo mismo que te muestra el Excel de cierre de mes, pero acá en pantalla, sin tener que bajarlo.</p>
+        <div class="stock-row">
+          <div>Ganancia cobrada</div>
+          <strong>${formatCurrency(gananciaMes)}</strong>
+        </div>
+        <div class="stock-row">
+          <div>− Costo del vehículo y operación</div>
+          <strong style="color:#dc2626;">${formatCurrency(res.costoTotalMes)}</strong>
+        </div>
+        <div class="stock-row" style="border-top:2px solid #e5e7eb; padding-top:10px; margin-top:6px;">
+          <strong>GANANCIA NETA ESTIMADA</strong>
+          <strong style="color:${(gananciaMes - res.costoTotalMes) >= 0 ? '#059669' : '#dc2626'}; font-size:16px;">
+            ${formatCurrency(gananciaMes - res.costoTotalMes)}
+          </strong>
+        </div>
+        ${kmDelMes === 0 ? `<p class="muted" style="margin-top:8px;">⚠️ Todavía no cargaste los km de ${mesResumenCapital}, así que el costo del vehículo puede estar incompleto (falta la parte de nafta y desgaste por km).</p>` : ""}
+      </div>
+
+      <div class="form-card">
         <h3 class="section-title">📊 Cierre de mes — ${mesResumenCapital}</h3>
         <p class="muted" style="margin-bottom:10px;">Un Excel con todo junto: ventas, ganancia cobrada, gastos del vehículo, inversión por marca, y la ganancia neta real de ${mesResumenCapital}.</p>
         <button class="btn-primary btn-full" onclick="exportarCierreMes()">📥 Exportar cierre de mes</button>
@@ -3041,7 +3095,9 @@ function registrarGastoVehiculo() {
 
 function guardarKmMes() {
   kmPorMes[mesResumen] = parseInt(document.getElementById("inputKmMes").value) || 0;
-  localStorage.setItem("alunexa_km_por_mes_v1", JSON.stringify(kmPorMes));
+  configVehiculo.actualizadoEn = Date.now();
+  localStorage.setItem("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
+  fetch(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "vehiculo", payload: [configVehiculo] }) });
   renderVistaResumen();
 }
 
