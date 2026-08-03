@@ -692,6 +692,28 @@ function guardarCliente() {
   if (!nombre) return alert("Escribí el nombre del cliente");
   if (!tipo) return alert("Elegí un tipo de comercio");
 
+  // Detectar si ya existe un cliente con el mismo nombre o el mismo teléfono
+  // (comparando sin importar mayúsculas/espacios), para no cargarlo de nuevo
+  // por error. Si estás editando un cliente, no lo compara contra sí mismo.
+  const normalizar = s => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const soloDigitos = s => (s || "").replace(/\D/g, "");
+  const nombreNorm = normalizar(nombre);
+  const telNorm = soloDigitos(telefono);
+
+  const posibleDuplicado = clients.find(c => {
+    if (c.eliminado) return false;
+    if (editandoClienteId && c.id === editandoClienteId) return false;
+    const mismoNombre = normalizar(c.nombre) === nombreNorm;
+    const mismoTelefono = telNorm.length >= 6 && (soloDigitos(c.telefono) === telNorm || soloDigitos(c.telefono2) === telNorm);
+    return mismoNombre || mismoTelefono;
+  });
+
+  if (posibleDuplicado) {
+    const motivo = normalizar(posibleDuplicado.nombre) === nombreNorm ? "el mismo nombre" : "el mismo teléfono";
+    const seguir = confirm(`⚠️ Ya tenés cargado a "${posibleDuplicado.nombre}" con ${motivo}. ¿Igual querés guardar este como un cliente nuevo?`);
+    if (!seguir) return;
+  }
+
   if (editandoClienteId) {
     const c = clients.find(c => c.id === editandoClienteId);
     if (c) Object.assign(c, { nombre, tipo, diaVisita, horario, frecuencia, telefono, telefono2, email, direccion, potencial, seguimiento, lat, lng, actualizadoEn: Date.now() });
@@ -789,11 +811,25 @@ function agregarItem() {
   const pSin = getPrecioConDescuento();
   const pCon = priceWithIVA(pSin);
 
-  currentItems.push({
-    id: generarId(), productId: prod.id, nombre: prod.nombre, categoria: prod.categoria,
-    cantidad, precioVentaSinIVA: pSin, precioVentaConIVA: pCon,
-    subtotalSinIVA: cantidad * pSin, subtotalConIVA: cantidad * pCon
-  });
+  // Si el producto ya está cargado en este pedido, no creamos una línea
+  // repetida: le sumamos la cantidad nueva a la que ya tenía.
+  const existente = currentItems.find(i => i.productId === prod.id);
+  if (existente) {
+    const cantidadAnterior = existente.cantidad;
+    existente.cantidad += cantidad;
+    existente.subtotalSinIVA += cantidad * pSin;
+    existente.subtotalConIVA += cantidad * pCon;
+    // Precio unitario promedio, por si esta vez lo cargó con otro descuento
+    existente.precioVentaSinIVA = existente.subtotalSinIVA / existente.cantidad;
+    existente.precioVentaConIVA = existente.subtotalConIVA / existente.cantidad;
+    alert(`⚠️ "${prod.nombre}" ya estaba en este pedido con ${cantidadAnterior}. Le sumé ${cantidad} más → ahora quedó en ${existente.cantidad}.`);
+  } else {
+    currentItems.push({
+      id: generarId(), productId: prod.id, nombre: prod.nombre, categoria: prod.categoria,
+      cantidad, precioVentaSinIVA: pSin, precioVentaConIVA: pCon,
+      subtotalSinIVA: cantidad * pSin, subtotalConIVA: cantidad * pCon
+    });
+  }
 
   renderPedido();
 
