@@ -1765,6 +1765,7 @@ function renderApp() {
     case "backup":      renderVistaBackup();      break;
     case "carga-masiva": renderVistaCargaMasiva(); break;
     case "inactivos":   renderVistaInactivos();   break;
+    case "potenciales": renderVistaPotenciales(); break;
   }
 }
 
@@ -1933,6 +1934,21 @@ function renderVistaClientes() {
       </div>
     </div>` : ""}
 
+    ${(() => {
+      const cantPotenciales = clients.filter(c => !c.eliminado && c.potencial).length;
+      if (cantPotenciales === 0) return "";
+      return `
+      <div class="form-card" style="cursor:pointer; border-left:4px solid #16a34a;" onclick="setVista('potenciales')">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <strong>🌱 ${cantPotenciales} cliente${cantPotenciales > 1 ? "s" : ""} potencial${cantPotenciales > 1 ? "es" : ""}</strong>
+            <div class="muted" style="font-size:13px;">Tocá para verlos todos juntos</div>
+          </div>
+          <span>›</span>
+        </div>
+      </div>`;
+    })()}
+
     <div class="search-box">
       <input id="inputBusquedaCliente" type="text" placeholder="🔍 Buscar por nombre, dirección o teléfono" value="${busquedaCliente}" oninput="buscarClientes(this.value)" />
       ${busquedaCliente ? `<button class="search-clear" onclick="buscarClientes('')">✕</button>` : ""}
@@ -2042,6 +2058,42 @@ function renderVistaInactivos() {
                 <span class="badge-sin-comprar">⏰ ${c.dias}d</span>
               </div>
               <div class="client-sub">${c.tipo || "Otro"}${c.diaVisita ? " · 📆 " + c.diaVisita : ""}${c.horario ? " · 🕐 " + c.horario : ""}${c.telefono ? " · " + c.telefono : ""}</div>
+            </div>
+            ${c.telefono ? `<button class="btn-recordatorio" onclick="event.stopPropagation(); abrirWhatsAppCliente('${c.id}')" title="Escribirle por WhatsApp">💬</button>` : ''}
+            <span class="client-arrow">›</span>
+          </div>
+        `).join("")}
+      `
+    }
+  `;
+}
+
+// ── Vista: CLIENTES POTENCIALES ─────────────────────────────────────────────
+function renderVistaPotenciales() {
+  const cont = document.getElementById("vista-contenido");
+  if (!cont) return;
+
+  const potenciales = clients
+    .filter(c => !c.eliminado && c.potencial)
+    .sort((a, b) => a.nombre.localeCompare(b.nombre));
+
+  cont.innerHTML = `
+    <div class="page-header">
+      <button class="btn-back" onclick="setVista('clientes')">← Volver</button>
+      <h2 class="page-title2">🌱 Clientes potenciales</h2>
+    </div>
+
+    ${potenciales.length === 0
+      ? `<div class="empty-state">No tenés clientes potenciales cargados por ahora.</div>`
+      : `
+        <p class="muted" style="margin:0 0 10px;">${potenciales.length} cliente${potenciales.length > 1 ? "s" : ""} potencial${potenciales.length > 1 ? "es" : ""}, todos juntos acá para que no se te pierdan entre el resto. En cuanto le cargues el primer pedido, pasa a ser cliente normal automáticamente.</p>
+        ${potenciales.map(c => `
+          <div class="client-item" onclick="abrirModalCliente('${c.id}')">
+            <div class="client-tipo-dot tipo-${(c.tipo || 'Otro').toLowerCase().replace('é','e').replace('ú','u')}"></div>
+            <div class="client-info">
+              <div class="client-name">${c.nombre}</div>
+              <div class="client-sub">${c.tipo || "Otro"}${c.diaVisita ? " · 📆 " + c.diaVisita : " · sin día asignado"}${c.horario ? " · 🕐 " + c.horario : ""}${c.telefono ? " · " + c.telefono : ""}</div>
+              ${c.seguimiento ? `<div class="muted" style="font-size:12px; margin-top:2px;">📝 ${c.seguimiento}</div>` : ""}
             </div>
             ${c.telefono ? `<button class="btn-recordatorio" onclick="event.stopPropagation(); abrirWhatsAppCliente('${c.id}')" title="Escribirle por WhatsApp">💬</button>` : ''}
             <span class="client-arrow">›</span>
