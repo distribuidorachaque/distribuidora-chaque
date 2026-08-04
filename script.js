@@ -1580,40 +1580,69 @@ function imprimirRemito(id) {
   if (!order) return;
 
   const modo = order.modoPrecio === "con" ? "con" : "sin";
-  let texto = "";
-  texto += "--------------------------------\n";
-  texto += `Cliente: ${order.client.nombre}\n`;
-  texto += `Fecha: ${order.fecha}\n`;
-  texto += "--------------------------------\n";
+  const lineas = [];
+  lineas.push("--------------------------------");
+  lineas.push(`Cliente: ${order.client.nombre}`);
+  lineas.push(`Fecha: ${order.fecha}`);
+  lineas.push("--------------------------------");
 
   order.items.forEach(i => {
     const precio = modo === "con" ? i.precioVentaConIVA : i.precioVentaSinIVA;
     const subtotal = modo === "con" ? i.subtotalConIVA : i.subtotalSinIVA;
     const esBlister12 = BLISTER_12.includes(i.nombre) && i.categoria === "Vita";
-    texto += `${i.cantidad} x ${i.nombre}\n`;
+    lineas.push(`${i.cantidad} x ${i.nombre}`);
     if (esBlister12) {
-      texto += `   ${formatCurrency(precio)} la caja = ${formatCurrency(precio / 12)} c/u\n`;
+      lineas.push(`   ${formatCurrency(precio)} la caja = ${formatCurrency(precio / 12)} c/u`);
     } else {
-      texto += `   ${formatCurrency(precio)} c/u = ${formatCurrency(subtotal)}\n`;
+      lineas.push(`   ${formatCurrency(precio)} c/u = ${formatCurrency(subtotal)}`);
     }
   });
 
-  texto += "--------------------------------\n";
+  lineas.push("--------------------------------");
   const total = modo === "con" ? order.totals.totalConIVA : order.totals.totalSinIVA;
-  texto += `TOTAL: ${formatCurrency(total)}\n`;
-  if (order.notas) texto += `\nNotas: ${order.notas}\n`;
-  texto += "\n¡Gracias por su compra!\n\n\n";
+  lineas.push(`TOTAL: ${formatCurrency(total)}`);
+  if (order.notas) { lineas.push(""); lineas.push(`Notas: ${order.notas}`); }
+  lineas.push("");
+  lineas.push("¡Gracias por su compra!");
 
-  const textoCodificado = encodeURI(texto);
+  // Armamos el logo + todo el texto como UNA sola imagen (con el canvas del
+  // navegador) y la mandamos a imprimir en un único envío. Antes lo
+  // mandábamos en dos partes (logo y después texto) y el celular bloqueaba
+  // la segunda por seguridad, por eso a veces salía solo el logo.
+  const logoImg = new Image();
+  logoImg.onload = () => {
+    const anchoCanvas = 384;
+    const anchoLogo = 220;
+    const altoLogo = Math.round(anchoLogo * (logoImg.height / logoImg.width));
+    const lineHeight = 20;
+    const paddingSup = 14;
+    const margenLogoTexto = 12;
+    const alturaTexto = lineas.length * lineHeight;
+    const altoCanvas = paddingSup + altoLogo + margenLogoTexto + alturaTexto + paddingSup;
 
-  // Primero mandamos el logo a imprimir, y después de un instante (para que
-  // RawBT termine con la imagen) mandamos el texto del remito. Si RawBT
-  // recibe los dos pedidos casi juntos puede perderse el segundo, por eso
-  // el pequeño delay entre uno y otro.
-  window.location.href = "intent:data:image/png;base64," + LOGO_TICKET_BASE64 + "#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;";
-  setTimeout(() => {
-    window.location.href = "intent:" + textoCodificado + "#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;";
-  }, 1500);
+    const canvas = document.createElement("canvas");
+    canvas.width = anchoCanvas;
+    canvas.height = altoCanvas;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, anchoCanvas, altoCanvas);
+
+    ctx.drawImage(logoImg, (anchoCanvas - anchoLogo) / 2, paddingSup, anchoLogo, altoLogo);
+
+    ctx.fillStyle = "#000000";
+    ctx.font = "15px monospace";
+    ctx.textBaseline = "top";
+    let y = paddingSup + altoLogo + margenLogoTexto;
+    lineas.forEach(linea => {
+      ctx.fillText(linea, 8, y);
+      y += lineHeight;
+    });
+
+    const dataUrl = canvas.toDataURL("image/png");
+    const base64 = dataUrl.split(",")[1];
+    window.location.href = "intent:data:image/png;base64," + base64 + "#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;";
+  };
+  logoImg.src = "data:image/png;base64," + LOGO_TICKET_BASE64;
 }
 
 function toggleFormPrecio(id) {
