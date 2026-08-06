@@ -1307,7 +1307,9 @@ function calcularVentasUltimosMeses(mesFin, anioFin, cantidad) {
       return parseInt(partes[1]) === m && parseInt(partes[2]) === a;
     }).reduce((acc, o) => acc + o.totals.totalSinIVA, 0);
     const nombreMes = new Date(a, m - 1, 1).toLocaleString("es-AR", { month: "short" });
-    resultado.push({ mes: m, anio: a, nombreMes: nombreMes.replace(".", ""), total });
+    const claveMes = `${a}-${String(m).padStart(2, "0")}`;
+    const meta = metaPorMes[claveMes] || 0;
+    resultado.push({ mes: m, anio: a, nombreMes: nombreMes.replace(".", ""), total, meta });
   }
   return resultado;
 }
@@ -2836,14 +2838,22 @@ function renderVistaResumen() {
         <div style="margin-top:14px; border-top:1px solid #e5e7eb; padding-top:12px;">
           <div class="muted" style="margin-bottom:8px;">📈 Ventas de los últimos 6 meses</div>
           <div style="display:flex; align-items:flex-end; gap:8px; height:110px;">
-            ${serie.map(s => `
+            ${serie.map(s => {
+              const esMesActual = s.mes === mesResumenSel && s.anio === anioResumenSel;
+              let color;
+              if (s.meta > 0) color = s.total >= s.meta ? '#059669' : '#dc2626';
+              else color = esMesActual ? '#3b82f6' : '#93c5fd';
+              const borde = esMesActual ? 'border:2px solid #1a1a2e;' : '';
+              return `
               <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%;">
                 <div style="font-size:10px; color:#6b7280; margin-bottom:2px;">${s.total > 0 ? formatCurrency(s.total).replace("$", "").trim() : ""}</div>
-                <div style="width:100%; max-width:34px; background:${s.mes === mesResumenSel && s.anio === anioResumenSel ? '#3b82f6' : '#93c5fd'}; border-radius:4px 4px 0 0; height:${Math.max(4, Math.round((s.total / maxVal) * 80))}px;"></div>
+                <div style="width:100%; max-width:34px; background:${color}; ${borde} border-radius:4px 4px 0 0; height:${Math.max(4, Math.round((s.total / maxVal) * 80))}px;"></div>
                 <div style="font-size:11px; color:#374151; margin-top:4px;">${s.nombreMes}</div>
               </div>
-            `).join("")}
+            `;
+            }).join("")}
           </div>
+          <p class="muted" style="margin:8px 0 0; font-size:11px;">🟢 Llegó a la meta del mes · 🔴 No llegó · Celeste: sin meta cargada ese mes</p>
         </div>`;
       })()}
     </div>
