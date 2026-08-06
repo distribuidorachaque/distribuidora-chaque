@@ -2795,7 +2795,20 @@ function renderVistaResumen() {
 
       ${(() => {
         const meta = metaPorMes[mesResumen] || 0;
-        const pct = meta > 0 ? Math.min(100, Math.round((totalVentas / meta) * 100)) : 0;
+        const pctReal = meta > 0 ? Math.round((totalVentas / meta) * 100) : 0;
+        const pctBarra = Math.min(100, pctReal);
+        const superado = pctReal > 100;
+
+        // Semáforo: arranca en rojo y va virando a verde a medida que te
+        // acercás a la meta. Si la superás, se pone dorado como festejo.
+        let color;
+        if (superado) color = '#d4af37';
+        else if (pctBarra < 30) color = '#dc2626';
+        else if (pctBarra < 60) color = '#f97316';
+        else if (pctBarra < 90) color = '#eab308';
+        else if (pctBarra < 100) color = '#84cc16';
+        else color = '#059669';
+
         return `
         <div style="margin-top:14px; border-top:1px solid #e5e7eb; padding-top:12px;">
           <div class="row-2">
@@ -2805,10 +2818,13 @@ function renderVistaResumen() {
             </div>
           </div>
           ${meta > 0 ? `
-            <div style="margin-top:10px; background:#e5e7eb; border-radius:8px; overflow:hidden; height:22px;">
-              <div style="width:${pct}%; background:${pct >= 100 ? '#059669' : '#3b82f6'}; height:100%; transition:width 0.3s;"></div>
+            <div style="margin-top:10px; background:#e5e7eb; border-radius:10px; overflow:hidden; height:30px; position:relative;">
+              <div style="width:${pctBarra}%; background:${color}; height:100%; transition:width 0.3s, background 0.3s;"></div>
+              <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; color:${pctBarra > 45 ? '#fff' : '#1a1a2e'};">
+                ${pctReal}%
+              </div>
             </div>
-            <p class="muted" style="margin:6px 0 0;">${pct}% de la meta — llevás ${formatCurrency(totalVentas)} de ${formatCurrency(meta)}${pct >= 100 ? " 🎉 ¡Meta cumplida!" : ""}</p>
+            <p class="muted" style="margin:6px 0 0;">Llevás ${formatCurrency(totalVentas)} de ${formatCurrency(meta)}${superado ? ` — 🏆 ¡Superaste la meta en ${formatCurrency(totalVentas - meta)}!` : (pctReal >= 100 ? " 🎉 ¡Meta cumplida!" : "")}</p>
           ` : ""}
         </div>`;
       })()}
