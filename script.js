@@ -81,7 +81,7 @@ const STORAGE_KEYS = {
 };
 const TIPOS_CLIENTE = ["Farmacia", "Dietética", "Supermercado", "Verdulería", "Kiosco", "Gimnasio", "Otro"];
 const DIAS_VISITA = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"];
-const HORARIOS_CLIENTE = ["Mañana", "Tarde", "Todo el día"];
+const HORARIOS_CLIENTE = ["Mañana", "Tarde", "Todo el día", "Corrido"];
 
 function generarId() {
   return "id-" + Date.now() + "-" + Math.floor(Math.random() * 100000);
@@ -1601,6 +1601,8 @@ function imprimirRemito(id) {
   lineas.push("--------------------------------");
   const total = modo === "con" ? order.totals.totalConIVA : order.totals.totalSinIVA;
   lineas.push(`TOTAL: ${formatCurrency(total)}`);
+  lineas.push("");
+  lineas.push("Comprobante no válido como factura");
   if (order.notas) { lineas.push(""); lineas.push(`Notas: ${order.notas}`); }
   lineas.push("");
   lineas.push("¡Gracias por su compra!");
@@ -2475,6 +2477,99 @@ function renderVistaHistorial() {
 }
 
 // ── Vista: DEUDORES ───────────────────────────────────────────────────────────
+// ── Pago del total adeudado por un cliente (reparte el monto entre sus
+// pedidos pendientes, del más viejo al más nuevo) ──────────────────────────
+function toggleFormPagoDeuda(id) {
+  const form = document.getElementById("form-pagodeuda-" + id);
+  if (!form) return;
+  const abrir = form.style.display === "none";
+  form.style.display = abrir ? "block" : "none";
+  if (abrir) {
+    const input = document.getElementById("inputMontoPagoDeuda-" + id);
+    if (input) input.value = deudaTotalCliente(id);
+  }
+}
+
+function elegirMedioPagoDeuda(id, medio) {
+  document.getElementById("medioPagoDeuda-" + id).value = medio;
+  document.getElementById("medioEfectivoDeuda-" + id).classList.toggle("active", medio === "Efectivo");
+  document.getElementById("medioTransferenciaDeuda-" + id).classList.toggle("active", medio === "Transferencia");
+}
+
+function ordenarPorFechaAsc(a, b) {
+  const pa = a.fecha.replace(/,.*/, '').split('/');
+  const pb = b.fecha.replace(/,.*/, '').split('/');
+  const fa = new Date(parseInt(pa[2]), parseInt(pa[1]) - 1, parseInt(pa[0]));
+  const fb = new Date(parseInt(pb[2]), parseInt(pb[1]) - 1, parseInt(pb[0]));
+  return fa - fb;
+}
+
+function confirmarPagoTotalCliente(clienteId) {
+  const client = clients.find(c => c.id === clienteId);
+  if (!client) return;
+
+  const deudaAntes = deudaTotalCliente(clienteId);
+  if (deudaAntes <= 0) return alert("Este cliente no tiene deuda pendiente.");
+
+  const montoInput = document.getElementById("inputMontoPagoDeuda-" + clienteId);
+  const monto = parseNumber(montoInput.value);
+  if (!monto || monto <= 0) return alert("Ingresá un monto válido");
+  if (monto > deudaAntes) return alert(`El monto supera la deuda total. Deuda actual: ${formatCurrency(deudaAntes)}`);
+
+  const medioInput = document.getElementById("medioPagoDeuda-" + clienteId);
+  const medio = medioInput ? medioInput.value : "Efectivo";
+
+  // Repartimos el pago entre los pedidos pendientes, empezando por el más
+  // viejo, hasta que se termine el monto que cargaste.
+  const ordenesPendientes = orders
+    .filter(o => o.client.id === clienteId && !o.eliminado && !o.pagado)
+    .sort(ordenarPorFechaAsc);
+
+  let restante = monto;
+  ordenesPendientes.forEach(o => {
+    if (restante <= 0) return;
+    const saldo = calcularSaldo(o);
+    if (saldo <= 0) return;
+    const aPagar = Math.min(restante, saldo);
+    if (!o.pagos) o.pagos = [];
+    o.pagos.push({ id: generarId(), fecha: new Date().toLocaleString("es-AR"), monto: aPagar, medio });
+    if (calcularSaldo(o) <= 0) o.pagado = true;
+    o.actualizadoEn = Date.now();
+    restante -= aPagar;
+  });
+
+  const deudaDespues = deudaTotalCliente(clienteId);
+  if (deudaDespues <= 0 && client.recordatorioPago) {
+    client.recordatorioPago = "";
+    client.actualizadoEn = Date.now();
+  }
+
+  const form = document.getElementById("form-pagodeuda-" + clienteId);
+  if (form) form.style.display = "none";
+
+  guardarStorage();
+  renderVistaDeudores();
+
+  // Ofrecemos mandarle un único mensaje avisándole del pago, en vez de uno
+  // por cada pedido.
+  const avisar = confirm(deudaDespues <= 0
+    ? `✅ Pago de ${formatCurrency(monto)} registrado. La cuenta de ${client.nombre} quedó al día.\n\n¿Le avisamos por WhatsApp?`
+    : `✅ Pago de ${formatCurrency(monto)} registrado. Todavía le queda un saldo de ${formatCurrency(deudaDespues)}.\n\n¿Le avisamos por WhatsApp?`);
+  if (avisar) enviarAvisoPagoRegistrado(clienteId, monto, medio, deudaDespues);
+}
+
+function enviarAvisoPagoRegistrado(clienteId, monto, medio, deudaRestante) {
+  const client = clients.find(c => c.id === clienteId);
+  if (!client) return;
+  const msg = deudaRestante <= 0
+    ? `Hola ${client.nombre} 👋\n\nRegistramos tu pago de *${formatCurrency(monto)}* (${medio}). ¡Tu cuenta quedó al día! Gracias 🙌`
+    : `Hola ${client.nombre} 👋\n\nRegistramos tu pago de *${formatCurrency(monto)}* (${medio}). Tu saldo pendiente ahora es *${formatCurrency(deudaRestante)}*. ¡Gracias! 🙌`;
+  const tel = client.telefono ? client.telefono.replace(/\D/g, "") : "";
+  const url = tel ? `https://wa.me/54${tel}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+  if (!tel) alert("Este cliente no tiene teléfono cargado — vas a tener que elegir el contacto a mano en WhatsApp.");
+  window.open(url, "_blank");
+}
+
 function renderVistaDeudores() {
   const cont = document.getElementById("vista-contenido");
   if (!cont) return;
@@ -2521,8 +2616,19 @@ function renderVistaDeudores() {
                   <button class="btn-success" onclick="guardarRecordatorioPago('${c.id}')">Guardar</button>
                 </div>
               </div>
+              <div id="form-pagodeuda-${c.id}" style="display:none; margin-top:8px; background:#f0fdf4; border-radius:10px; padding:10px;" onclick="event.stopPropagation()">
+                <div class="muted" style="margin-bottom:6px;">Deuda total: ${formatCurrency(c.deuda)}</div>
+                <input type="number" id="inputMontoPagoDeuda-${c.id}" placeholder="Monto pagado" value="${c.deuda}" style="margin-bottom:6px;" />
+                <input type="hidden" id="medioPagoDeuda-${c.id}" value="Efectivo" />
+                <div class="row-2" style="margin-bottom:8px;">
+                  <button type="button" id="medioEfectivoDeuda-${c.id}" class="medio-pago-tab active" onclick="elegirMedioPagoDeuda('${c.id}','Efectivo')">💵 Efectivo</button>
+                  <button type="button" id="medioTransferenciaDeuda-${c.id}" class="medio-pago-tab" onclick="elegirMedioPagoDeuda('${c.id}','Transferencia')">🏦 Transferencia</button>
+                </div>
+                <button class="btn-success btn-full" onclick="confirmarPagoTotalCliente('${c.id}')">✅ Confirmar pago y avisarle</button>
+              </div>
             </div>
             <strong style="color:#dc2626;">${formatCurrency(c.deuda)}</strong>
+            <button class="btn-recordatorio" onclick="event.stopPropagation(); toggleFormPagoDeuda('${c.id}')" title="Registrar el pago de toda la deuda">💵</button>
             <button class="btn-recordatorio" onclick="event.stopPropagation(); toggleFormRecordatorio('${c.id}')" title="Poner fecha para recordar cobrar">📅</button>
             <button class="btn-recordatorio" onclick="event.stopPropagation(); enviarRecordatorioPago('${c.id}')" title="Mandar recordatorio de pago por WhatsApp">💬</button>
           </div>
