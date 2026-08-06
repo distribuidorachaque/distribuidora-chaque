@@ -2674,7 +2674,7 @@ function renderVistaResumen() {
   const fechaMostrar = fechaConCero;
   const totalHoy = pedidosHoy.reduce((a, o) => a + o.totals.totalSinIVA, 0);
 
-  const totalDeuda = clients.reduce((a, c) => a + deudaTotalCliente(c.id), 0);
+  const totalDeuda = clients.filter(c => !c.eliminado).reduce((a, c) => a + deudaTotalCliente(c.id), 0);
   const [anioResumenSel, mesResumenSel] = mesResumen.split("-").map(Number);
   const mesResumenNombre = new Date(anioResumenSel, mesResumenSel - 1, 1).toLocaleString("es-AR", { month: "long" });
   const mesResumenCapital = mesResumenNombre.charAt(0).toUpperCase() + mesResumenNombre.slice(1);
