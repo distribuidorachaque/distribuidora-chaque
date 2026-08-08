@@ -183,6 +183,9 @@ kmPorMes = configVehiculo.kmPorMes;
 metaPorMes = configVehiculo.metaPorMes;
 
 let marcasListaPrecios = new Set();
+let marcaAvisoSeleccionada = null;
+let mensajeAvisoMarca = "";
+let enviadosAvisoMarca = new Set();
 
 // ── Almacenamiento ───────────────────────────────────────────────────────────
 function guardarLocal() {
@@ -1835,6 +1838,7 @@ function renderApp() {
     case "carga-masiva": renderVistaCargaMasiva(); break;
     case "inactivos":   renderVistaInactivos();   break;
     case "potenciales": renderVistaPotenciales(); break;
+    case "aviso-marca": renderVistaAvisoMarca();  break;
   }
 }
 
@@ -3157,6 +3161,126 @@ function precioPorUnidadTexto(p) {
   return "";
 }
 
+// ── Avisar aumento de precio a los clientes que compran cada marca ──────────
+function abrirAvisoMarca() {
+  marcaAvisoSeleccionada = null;
+  mensajeAvisoMarca = "";
+  enviadosAvisoMarca = new Set();
+  setVista("aviso-marca");
+}
+
+// Clientes que alguna vez compraron algo de esa marca (mirando su historial
+// real de pedidos, no listas armadas a mano).
+function clientesQueComprenMarca(marca) {
+  const idsQueCompraron = new Set();
+  orders.forEach(o => {
+    if (o.borrador || o.eliminado) return;
+    if (o.items.some(i => i.categoria === marca)) idsQueCompraron.add(o.client.id);
+  });
+  return clients
+    .filter(c => !c.eliminado && idsQueCompraron.has(c.id))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre));
+}
+
+function mensajeAvisoMarcaPorDefecto(marca) {
+  return `Hola {nombre} 👋\n\nTe contamos que a partir de la semana que viene los precios de *${marca}* van a tener un ajuste. Cualquier consulta, quedo a disposición.\n\n¡Gracias! 🙌`;
+}
+
+function elegirMarcaAviso(marca) {
+  marcaAvisoSeleccionada = marca;
+  mensajeAvisoMarca = mensajeAvisoMarcaPorDefecto(marca);
+  enviadosAvisoMarca = new Set();
+  renderVistaAvisoMarca();
+}
+
+function actualizarMensajeAvisoMarca() {
+  const el = document.getElementById("textareaAvisoMarca");
+  if (el) mensajeAvisoMarca = el.value;
+}
+
+function restablecerMensajeAvisoMarca() {
+  if (!marcaAvisoSeleccionada) return;
+  mensajeAvisoMarca = mensajeAvisoMarcaPorDefecto(marcaAvisoSeleccionada);
+  renderVistaAvisoMarca();
+}
+
+function enviarAvisoMarcaCliente(clienteId) {
+  const c = clients.find(x => x.id === clienteId);
+  if (!c) return;
+  actualizarMensajeAvisoMarca();
+  const msg = mensajeAvisoMarca.replace(/\{nombre\}/g, c.nombre);
+  const tel = c.telefono ? c.telefono.replace(/\D/g, "") : "";
+  if (!tel) return alert(`${c.nombre} no tiene teléfono cargado — tenés que avisarle por otro medio.`);
+  window.open(`https://wa.me/54${tel}?text=${encodeURIComponent(msg)}`, "_blank");
+  enviadosAvisoMarca.add(clienteId);
+  renderVistaAvisoMarca();
+}
+
+function renderVistaAvisoMarca() {
+  const cont = document.getElementById("vista-contenido");
+  if (!cont) return;
+
+  const marcasDisponibles = [...new Set(catalog.map(p => p.categoria))].sort();
+
+  if (!marcaAvisoSeleccionada) {
+    cont.innerHTML = `
+      <div class="page-header">
+        <button class="btn-back" onclick="abrirStock()">← Volver</button>
+        <h2 class="page-title2">📢 Avisar aumento</h2>
+      </div>
+      <div class="form-card">
+        <h3 class="section-title">¿A qué marca le subiste el precio?</h3>
+        <p class="muted" style="margin-bottom:10px;">Elegí la marca y el sistema arma solo la lista de los clientes que alguna vez te compraron algo de esa marca, mirando su historial de pedidos.</p>
+        <div class="marcas-check-grid">
+          ${marcasDisponibles.map(m => `
+            <button class="tipo-tab" style="width:100%;" onclick="elegirMarcaAviso('${m}')">${m}</button>
+          `).join("")}
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  const clientesMarca = clientesQueComprenMarca(marcaAvisoSeleccionada);
+  const conTelefono = clientesMarca.filter(c => c.telefono);
+  const sinTelefono = clientesMarca.filter(c => !c.telefono);
+
+  cont.innerHTML = `
+    <div class="page-header">
+      <button class="btn-back" onclick="marcaAvisoSeleccionada=null; renderVistaAvisoMarca();">← Cambiar marca</button>
+      <h2 class="page-title2">📢 ${marcaAvisoSeleccionada}</h2>
+    </div>
+
+    <div class="form-card">
+      <h3 class="section-title">Mensaje</h3>
+      <p class="muted" style="margin:0 0 8px;">Usá <strong>{nombre}</strong> donde quieras que aparezca el nombre de cada cliente — se completa solo al mandarlo.</p>
+      <textarea id="textareaAvisoMarca" rows="6" onchange="actualizarMensajeAvisoMarca()" style="width:100%; font-family:inherit; font-size:14px; padding:10px; border-radius:10px; border:1px solid #e5e7eb;">${mensajeAvisoMarca}</textarea>
+      <button class="btn-sm btn-outline" style="margin-top:8px;" onclick="restablecerMensajeAvisoMarca()">↺ Restablecer mensaje</button>
+    </div>
+
+    <div class="form-card">
+      <h3 class="section-title">Clientes que compran ${marcaAvisoSeleccionada} (${clientesMarca.length})</h3>
+      ${clientesMarca.length === 0
+        ? `<div class="empty-state">Todavía no le vendiste ${marcaAvisoSeleccionada} a ningún cliente.</div>`
+        : `
+        <p class="muted" style="margin:0 0 10px;">Tocá "Enviar" en cada uno para abrirle WhatsApp con el mensaje ya escrito — solo te queda apretar mandar. Se van marcando ✅ a medida que los vas tocando.</p>
+        ${conTelefono.map(c => `
+          <div class="stock-row">
+            <div>
+              <div class="stock-nombre">${enviadosAvisoMarca.has(c.id) ? "✅ " : ""}${c.nombre}</div>
+              <div class="muted">${c.telefono}</div>
+            </div>
+            <button class="btn-sm ${enviadosAvisoMarca.has(c.id) ? 'btn-outline' : 'btn-success'}" onclick="enviarAvisoMarcaCliente('${c.id}')">${enviadosAvisoMarca.has(c.id) ? "Reenviar" : "💬 Enviar"}</button>
+          </div>
+        `).join("")}
+        ${sinTelefono.length > 0 ? `
+          <p class="muted" style="margin-top:12px;">⚠️ Sin teléfono cargado (avisales por otro medio): ${sinTelefono.map(c => c.nombre).join(", ")}</p>
+        ` : ""}
+      `}
+    </div>
+  `;
+}
+
 function abrirListaPrecios() {
   marcasListaPrecios = new Set();
   setVista("lista-precios");
@@ -3389,7 +3513,10 @@ function renderVistaStock() {
   cont.innerHTML = `
     <div class="page-header">
       <h2 class="page-title2">Stock</h2>
-      <button class="btn-guardar-ahora" onclick="abrirListaPrecios()">📋 Lista precios</button>
+      <div style="display:flex; gap:8px;">
+        <button class="btn-guardar-ahora" onclick="abrirListaPrecios()">📋 Lista precios</button>
+        <button class="btn-guardar-ahora" onclick="abrirAvisoMarca()">📢 Avisar aumento</button>
+      </div>
     </div>
 
     <div class="tipo-tabs">
