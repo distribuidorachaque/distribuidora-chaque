@@ -2234,6 +2234,64 @@ function agruparClientesPorZona(routeClients, numGrupos) {
   return grupos.filter(g => g.length > 0);
 }
 
+// Convierte una dirección escrita a mano en coordenadas GPS, usando el
+// servicio gratuito de OpenStreetMap (Nominatim). Le agregamos "Santa Fe,
+// Argentina" para que ubique mejor, ya que las direcciones sueltas sin
+// ciudad suelen confundir al buscador.
+async function geocodificarDireccion(direccion) {
+  try {
+    const query = encodeURIComponent(direccion + ", Santa Fe, Argentina");
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${query}`);
+    const data = await res.json();
+    if (data && data.length > 0) {
+      return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+    }
+  } catch (e) {
+    console.log("Error geocodificando dirección:", e);
+  }
+  return null;
+}
+
+let geocodificandoDirecciones = false;
+
+async function geocodificarDireccionesFaltantes() {
+  if (geocodificandoDirecciones) return;
+  const pendientes = clients.filter(c =>
+    !c.eliminado && (c.tipo || "Otro") !== "Otro" && !c.potencial &&
+    c.direccion && c.direccion.trim() && !(c.lat != null && c.lng != null && c.lat !== "" && c.lng !== "")
+  );
+  if (pendientes.length === 0) return alert("No tenés direcciones escritas pendientes de ubicar (o ya tienen GPS, o no tienen dirección cargada).");
+
+  geocodificandoDirecciones = true;
+  let encontrados = 0;
+  const noEncontrados = [];
+
+  for (let i = 0; i < pendientes.length; i++) {
+    const c = pendientes[i];
+    const progresoEl = document.getElementById("progresoGeocoding");
+    if (progresoEl) progresoEl.textContent = `Ubicando ${i + 1} de ${pendientes.length}: ${c.nombre}...`;
+
+    const coords = await geocodificarDireccion(c.direccion);
+    if (coords) {
+      c.lat = coords.lat;
+      c.lng = coords.lng;
+      c.actualizadoEn = Date.now();
+      encontrados++;
+    } else {
+      noEncontrados.push(c.nombre);
+    }
+
+    // Este servicio gratuito pide como máximo 1 pedido por segundo, por eso
+    // esta pausa entre cliente y cliente.
+    if (i < pendientes.length - 1) await new Promise(r => setTimeout(r, 1100));
+  }
+
+  geocodificandoDirecciones = false;
+  guardarStorage();
+  alert(`✅ Se ubicaron ${encontrados} de ${pendientes.length} direcciones.${noEncontrados.length > 0 ? `\n\nNo se encontraron (revisalas o cargales el GPS a mano estando ahí): ${noEncontrados.join(", ")}` : ""}`);
+  renderVistaRutasSugeridas();
+}
+
 function generarRutasSugeridas() {
   const porDia = parseInt(document.getElementById("inputClientesPorDia")?.value) || 15;
   clientesPorDiaRuta = porDia;
@@ -2282,6 +2340,14 @@ function renderVistaRutasSugeridas() {
 
     <div class="form-card">
       <p class="muted" style="margin:0 0 10px;">Agrupa a tus clientes por cercanía, usando la ubicación GPS que cargaste en cada uno. Tenés <strong>${routeClients.length}</strong> clientes con ubicación cargada, listos para agrupar.</p>
+
+      ${sinUbicacion.length > 0 ? `
+      <div style="background:#fef3c7; border-radius:10px; padding:10px; margin-bottom:12px;">
+        <p class="muted" style="margin:0 0 8px; color:#92400e;">⚠️ ${sinUbicacion.length} cliente${sinUbicacion.length > 1 ? "s" : ""} sin ubicación GPS. Si les cargaste la dirección escrita a mano, puedo intentar ubicarlos automáticamente:</p>
+        <button class="btn-primary btn-full" onclick="geocodificarDireccionesFaltantes()">📮 Ubicar direcciones cargadas a mano</button>
+        <p id="progresoGeocoding" class="muted" style="margin-top:6px;"></p>
+      </div>` : ""}
+
       <div class="row-2">
         <div class="form-group" style="margin:0;">
           <label>Clientes por día (aprox.)</label>
@@ -2289,7 +2355,7 @@ function renderVistaRutasSugeridas() {
         </div>
       </div>
       <button class="btn-primary btn-full" style="margin-top:10px;" onclick="generarRutasSugeridas()">📍 Armar grupos por cercanía</button>
-      ${sinUbicacion.length > 0 ? `<p class="muted" style="margin-top:10px;">⚠️ ${sinUbicacion.length} cliente${sinUbicacion.length > 1 ? "s" : ""} sin ubicación cargada, no entran en el agrupamiento: ${sinUbicacion.map(c => c.nombre).join(", ")}. La próxima vez que estés ahí, entrá a su ficha y usá "📍 Usar mi ubicación" para que la próxima vez sí se agrupe.</p>` : ""}
+      ${sinUbicacion.length > 0 ? `<p class="muted" style="margin-top:10px;">Clientes todavía sin ubicación: ${sinUbicacion.map(c => c.nombre).join(", ")}</p>` : ""}
     </div>
 
     ${gruposRutasSugeridas ? gruposRutasSugeridas.map((g, idx) => `
