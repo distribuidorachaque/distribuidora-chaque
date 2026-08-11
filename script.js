@@ -1839,6 +1839,7 @@ function renderApp() {
     case "inactivos":   renderVistaInactivos();   break;
     case "potenciales": renderVistaPotenciales(); break;
     case "aviso-marca": renderVistaAvisoMarca();  break;
+    case "rutas-sugeridas": renderVistaRutasSugeridas(); break;
   }
 }
 
@@ -2022,6 +2023,16 @@ function renderVistaClientes() {
       </div>`;
     })()}
 
+    <div class="form-card" style="cursor:pointer; border-left:4px solid #7c3aed;" onclick="setVista('rutas-sugeridas')">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <strong>🗺️ Organizar recorridos por zona</strong>
+          <div class="muted" style="font-size:13px;">Agrupa tus clientes por cercanía usando su ubicación</div>
+        </div>
+        <span>›</span>
+      </div>
+    </div>
+
     <div class="search-box">
       <input id="inputBusquedaCliente" type="text" placeholder="🔍 Buscar por nombre, dirección o teléfono" value="${busquedaCliente}" oninput="buscarClientes(this.value)" />
       ${busquedaCliente ? `<button class="search-clear" onclick="buscarClientes('')">✕</button>` : ""}
@@ -2174,6 +2185,133 @@ function renderVistaPotenciales() {
         `).join("")}
       `
     }
+  `;
+}
+
+// ── Organizar recorridos por zona (agrupa por cercanía usando lat/lng) ──────
+let clientesPorDiaRuta = 15;
+let gruposRutasSugeridas = null;
+
+// Clientes "de ruta" con ubicación cargada: los únicos que tiene sentido
+// agrupar en un recorrido (a los de tipo "Otro" y los potenciales no los
+// visitás en ruta fija).
+function clientesConUbicacionParaRuta() {
+  return clients.filter(c => !c.eliminado && (c.tipo || "Otro") !== "Otro" && !c.potencial && c.lat != null && c.lng != null && c.lat !== "" && c.lng !== "");
+}
+
+// Agrupamiento simple por cercanía (estilo k-means) usando lat/lng.
+function agruparClientesPorZona(routeClients, numGrupos) {
+  if (routeClients.length === 0 || numGrupos <= 0) return [];
+  numGrupos = Math.min(numGrupos, routeClients.length);
+
+  const ordenados = [...routeClients].sort((a, b) => a.lat - b.lat);
+  let centroides = [];
+  for (let i = 0; i < numGrupos; i++) {
+    const idx = Math.floor(i * ordenados.length / numGrupos);
+    centroides.push({ lat: Number(ordenados[idx].lat), lng: Number(ordenados[idx].lng) });
+  }
+
+  let asignacion = new Array(routeClients.length).fill(0);
+  for (let iter = 0; iter < 15; iter++) {
+    routeClients.forEach((c, i) => {
+      let mejorD = Infinity, mejorIdx = 0;
+      centroides.forEach((cen, gi) => {
+        const d = Math.pow(Number(c.lat) - cen.lat, 2) + Math.pow(Number(c.lng) - cen.lng, 2);
+        if (d < mejorD) { mejorD = d; mejorIdx = gi; }
+      });
+      asignacion[i] = mejorIdx;
+    });
+    const sumas = centroides.map(() => ({ lat: 0, lng: 0, n: 0 }));
+    routeClients.forEach((c, i) => {
+      const g = asignacion[i];
+      sumas[g].lat += Number(c.lat); sumas[g].lng += Number(c.lng); sumas[g].n += 1;
+    });
+    centroides = centroides.map((cen, gi) => sumas[gi].n > 0 ? { lat: sumas[gi].lat / sumas[gi].n, lng: sumas[gi].lng / sumas[gi].n } : cen);
+  }
+
+  const grupos = centroides.map(() => []);
+  routeClients.forEach((c, i) => grupos[asignacion[i]].push(c));
+  return grupos.filter(g => g.length > 0);
+}
+
+function generarRutasSugeridas() {
+  const porDia = parseInt(document.getElementById("inputClientesPorDia")?.value) || 15;
+  clientesPorDiaRuta = porDia;
+  const routeClients = clientesConUbicacionParaRuta();
+  const numGrupos = Math.max(1, Math.round(routeClients.length / porDia));
+  const grupos = agruparClientesPorZona(routeClients, numGrupos);
+  gruposRutasSugeridas = grupos.map(g => ({
+    clientes: g.sort((a, b) => a.nombre.localeCompare(b.nombre)),
+    diaAsignado: ""
+  }));
+  renderVistaRutasSugeridas();
+}
+
+function asignarDiaGrupo(idx, dia) {
+  if (!gruposRutasSugeridas || !gruposRutasSugeridas[idx]) return;
+  gruposRutasSugeridas[idx].diaAsignado = dia;
+}
+
+function aplicarDiaGrupo(idx) {
+  if (!gruposRutasSugeridas || !gruposRutasSugeridas[idx]) return;
+  const grupo = gruposRutasSugeridas[idx];
+  const dia = document.getElementById("selectDiaGrupo-" + idx)?.value || "";
+  if (!dia) return alert("Elegí primero a qué día asignás este grupo.");
+  grupo.clientes.forEach(c => {
+    const real = clients.find(x => x.id === c.id);
+    if (real) { real.diaVisita = dia; real.actualizadoEn = Date.now(); }
+  });
+  grupo.diaAsignado = dia;
+  grupo.aplicado = true;
+  guardarStorage();
+  renderVistaRutasSugeridas();
+}
+
+function renderVistaRutasSugeridas() {
+  const cont = document.getElementById("vista-contenido");
+  if (!cont) return;
+
+  const routeClients = clientesConUbicacionParaRuta();
+  const sinUbicacion = clients.filter(c => !c.eliminado && (c.tipo || "Otro") !== "Otro" && !c.potencial && !(c.lat != null && c.lng != null && c.lat !== "" && c.lng !== ""));
+
+  cont.innerHTML = `
+    <div class="page-header">
+      <button class="btn-back" onclick="setVista('clientes')">← Volver</button>
+      <h2 class="page-title2">🗺️ Organizar recorridos</h2>
+    </div>
+
+    <div class="form-card">
+      <p class="muted" style="margin:0 0 10px;">Agrupa a tus clientes por cercanía, usando la ubicación GPS que cargaste en cada uno. Tenés <strong>${routeClients.length}</strong> clientes con ubicación cargada, listos para agrupar.</p>
+      <div class="row-2">
+        <div class="form-group" style="margin:0;">
+          <label>Clientes por día (aprox.)</label>
+          <input id="inputClientesPorDia" type="number" min="1" value="${clientesPorDiaRuta}" />
+        </div>
+      </div>
+      <button class="btn-primary btn-full" style="margin-top:10px;" onclick="generarRutasSugeridas()">📍 Armar grupos por cercanía</button>
+      ${sinUbicacion.length > 0 ? `<p class="muted" style="margin-top:10px;">⚠️ ${sinUbicacion.length} cliente${sinUbicacion.length > 1 ? "s" : ""} sin ubicación cargada, no entran en el agrupamiento: ${sinUbicacion.map(c => c.nombre).join(", ")}. La próxima vez que estés ahí, entrá a su ficha y usá "📍 Usar mi ubicación" para que la próxima vez sí se agrupe.</p>` : ""}
+    </div>
+
+    ${gruposRutasSugeridas ? gruposRutasSugeridas.map((g, idx) => `
+      <div class="form-card">
+        <h3 class="section-title">Grupo ${idx + 1} — ${g.clientes.length} clientes${g.aplicado ? ` (✅ asignado a ${g.diaAsignado})` : ""}</h3>
+        ${g.clientes.map(c => `
+          <div class="stock-row">
+            <div>
+              <div class="stock-nombre">${c.nombre}</div>
+              <div class="muted">${c.direccion || "sin dirección cargada"}</div>
+            </div>
+          </div>
+        `).join("")}
+        <div class="row-2" style="margin-top:10px;">
+          <select id="selectDiaGrupo-${idx}" onchange="asignarDiaGrupo(${idx}, this.value)">
+            <option value="">Elegí un día</option>
+            ${DIAS_VISITA.map(d => `<option value="${d}" ${g.diaAsignado === d ? "selected" : ""}>${d}</option>`).join("")}
+          </select>
+          <button class="btn-success" onclick="aplicarDiaGrupo(${idx})">✅ Aplicar día a este grupo</button>
+        </div>
+      </div>
+    `).join("") : ""}
   `;
 }
 
