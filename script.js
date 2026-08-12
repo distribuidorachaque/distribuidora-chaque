@@ -1839,7 +1839,7 @@ function renderApp() {
     case "inactivos":   renderVistaInactivos();   break;
     case "potenciales": renderVistaPotenciales(); break;
     case "aviso-marca": renderVistaAvisoMarca();  break;
-    case "rutas-sugeridas": renderVistaRutasSugeridas(); break;
+    case "mapa-rutas": renderVistaMapaRutas(); break;
   }
 }
 
@@ -2023,11 +2023,11 @@ function renderVistaClientes() {
       </div>`;
     })()}
 
-    <div class="form-card" style="cursor:pointer; border-left:4px solid #7c3aed;" onclick="setVista('rutas-sugeridas')">
+    <div class="form-card" style="cursor:pointer; border-left:4px solid #7c3aed;" onclick="setVista('mapa-rutas')">
       <div style="display:flex; justify-content:space-between; align-items:center;">
         <div>
-          <strong>🗺️ Organizar recorridos por zona</strong>
-          <div class="muted" style="font-size:13px;">Agrupa tus clientes por cercanía usando su ubicación</div>
+          <strong>🗺️ Mapa de recorridos</strong>
+          <div class="muted" style="font-size:13px;">Ve a tus clientes en un mapa real y armá los grupos vos mismo</div>
         </div>
         <span>›</span>
       </div>
@@ -2188,50 +2188,21 @@ function renderVistaPotenciales() {
   `;
 }
 
-// ── Organizar recorridos por zona (agrupa por cercanía usando lat/lng) ──────
-let clientesPorDiaRuta = 15;
-let gruposRutasSugeridas = null;
+// ── Organizar recorridos con un mapa real (Leaflet + OpenStreetMap) ─────────
+const DIAS_COLOR = {
+  "": "#9ca3af",
+  "Lunes": "#3b82f6",
+  "Martes": "#10b981",
+  "Miércoles": "#f59e0b",
+  "Jueves": "#8b5cf6",
+  "Viernes": "#ef4444"
+};
 
 // Clientes "de ruta" con ubicación cargada: los únicos que tiene sentido
-// agrupar en un recorrido (a los de tipo "Otro" y los potenciales no los
+// mostrar en el mapa (a los de tipo "Otro" y los potenciales no los
 // visitás en ruta fija).
 function clientesConUbicacionParaRuta() {
   return clients.filter(c => !c.eliminado && (c.tipo || "Otro") !== "Otro" && !c.potencial && c.lat != null && c.lng != null && c.lat !== "" && c.lng !== "");
-}
-
-// Agrupamiento simple por cercanía (estilo k-means) usando lat/lng.
-function agruparClientesPorZona(routeClients, numGrupos) {
-  if (routeClients.length === 0 || numGrupos <= 0) return [];
-  numGrupos = Math.min(numGrupos, routeClients.length);
-
-  const ordenados = [...routeClients].sort((a, b) => a.lat - b.lat);
-  let centroides = [];
-  for (let i = 0; i < numGrupos; i++) {
-    const idx = Math.floor(i * ordenados.length / numGrupos);
-    centroides.push({ lat: Number(ordenados[idx].lat), lng: Number(ordenados[idx].lng) });
-  }
-
-  let asignacion = new Array(routeClients.length).fill(0);
-  for (let iter = 0; iter < 15; iter++) {
-    routeClients.forEach((c, i) => {
-      let mejorD = Infinity, mejorIdx = 0;
-      centroides.forEach((cen, gi) => {
-        const d = Math.pow(Number(c.lat) - cen.lat, 2) + Math.pow(Number(c.lng) - cen.lng, 2);
-        if (d < mejorD) { mejorD = d; mejorIdx = gi; }
-      });
-      asignacion[i] = mejorIdx;
-    });
-    const sumas = centroides.map(() => ({ lat: 0, lng: 0, n: 0 }));
-    routeClients.forEach((c, i) => {
-      const g = asignacion[i];
-      sumas[g].lat += Number(c.lat); sumas[g].lng += Number(c.lng); sumas[g].n += 1;
-    });
-    centroides = centroides.map((cen, gi) => sumas[gi].n > 0 ? { lat: sumas[gi].lat / sumas[gi].n, lng: sumas[gi].lng / sumas[gi].n } : cen);
-  }
-
-  const grupos = centroides.map(() => []);
-  routeClients.forEach((c, i) => grupos[asignacion[i]].push(c));
-  return grupos.filter(g => g.length > 0);
 }
 
 // Convierte una dirección escrita a mano en coordenadas GPS, usando el
@@ -2289,96 +2260,188 @@ async function geocodificarDireccionesFaltantes() {
   geocodificandoDirecciones = false;
   guardarStorage();
   alert(`✅ Se ubicaron ${encontrados} de ${pendientes.length} direcciones.${noEncontrados.length > 0 ? `\n\nNo se encontraron (revisalas o cargales el GPS a mano estando ahí): ${noEncontrados.join(", ")}` : ""}`);
-  renderVistaRutasSugeridas();
+  renderVistaMapaRutas();
 }
 
-function generarRutasSugeridas() {
-  const porDia = parseInt(document.getElementById("inputClientesPorDia")?.value) || 15;
-  clientesPorDiaRuta = porDia;
-  const routeClients = clientesConUbicacionParaRuta();
-  const numGrupos = Math.max(1, Math.round(routeClients.length / porDia));
-  const grupos = agruparClientesPorZona(routeClients, numGrupos);
-  gruposRutasSugeridas = grupos.map(g => ({
-    clientes: g.sort((a, b) => a.nombre.localeCompare(b.nombre)),
-    diaAsignado: ""
-  }));
-  renderVistaRutasSugeridas();
-}
-
-function asignarDiaGrupo(idx, dia) {
-  if (!gruposRutasSugeridas || !gruposRutasSugeridas[idx]) return;
-  gruposRutasSugeridas[idx].diaAsignado = dia;
-}
-
-function aplicarDiaGrupo(idx) {
-  if (!gruposRutasSugeridas || !gruposRutasSugeridas[idx]) return;
-  const grupo = gruposRutasSugeridas[idx];
-  const dia = document.getElementById("selectDiaGrupo-" + idx)?.value || "";
-  if (!dia) return alert("Elegí primero a qué día asignás este grupo.");
-  grupo.clientes.forEach(c => {
-    const real = clients.find(x => x.id === c.id);
-    if (real) { real.diaVisita = dia; real.actualizadoEn = Date.now(); }
+// Carga Leaflet (librería de mapas gratuita, sin necesitar API key) solo la
+// primera vez que hace falta.
+function cargarLeaflet() {
+  return new Promise((resolve, reject) => {
+    if (window.L) return resolve();
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css";
+    document.head.appendChild(link);
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js";
+    script.onload = resolve;
+    script.onerror = () => reject(new Error("No se pudo cargar el mapa"));
+    document.head.appendChild(script);
   });
-  grupo.diaAsignado = dia;
-  grupo.aplicado = true;
-  guardarStorage();
-  renderVistaRutasSugeridas();
 }
 
-function renderVistaRutasSugeridas() {
+let clientesSeleccionadosMapa = new Set();
+let mapaRutasInstancia = null;
+let mapaRutasMarkers = {};
+
+function inicializarMapaRutas() {
+  const contenedor = document.getElementById("mapaRutasContenedor");
+  if (!contenedor || !window.L) return;
+
+  if (mapaRutasInstancia) {
+    try { mapaRutasInstancia.remove(); } catch (e) { /* ya estaba destruido, no pasa nada */ }
+    mapaRutasInstancia = null;
+  }
+  mapaRutasMarkers = {};
+
+  const routeClients = clientesConUbicacionParaRuta();
+  if (routeClients.length === 0) return;
+
+  const lats = routeClients.map(c => Number(c.lat));
+  const lngs = routeClients.map(c => Number(c.lng));
+  const centerLat = lats.reduce((a, b) => a + b, 0) / lats.length;
+  const centerLng = lngs.reduce((a, b) => a + b, 0) / lngs.length;
+
+  mapaRutasInstancia = L.map("mapaRutasContenedor").setView([centerLat, centerLng], 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap',
+    maxZoom: 19
+  }).addTo(mapaRutasInstancia);
+
+  routeClients.forEach(c => {
+    const seleccionado = clientesSeleccionadosMapa.has(c.id);
+    const color = seleccionado ? '#fbbf24' : (DIAS_COLOR[c.diaVisita || ""] || DIAS_COLOR[""]);
+    const marker = L.circleMarker([Number(c.lat), Number(c.lng)], {
+      radius: seleccionado ? 11 : 8,
+      fillColor: color,
+      color: '#1a1a2e',
+      weight: seleccionado ? 2 : 1,
+      fillOpacity: 0.9
+    }).addTo(mapaRutasInstancia);
+    marker.bindPopup(`<strong>${c.nombre}</strong><br>${c.direccion || ""}<br>${c.diaVisita ? "Día actual: " + c.diaVisita : "Sin día asignado"}`);
+    marker.on("click", () => toggleClienteMapa(c.id));
+    mapaRutasMarkers[c.id] = marker;
+  });
+
+  const bounds = L.latLngBounds(routeClients.map(c => [Number(c.lat), Number(c.lng)]));
+  mapaRutasInstancia.fitBounds(bounds, { padding: [30, 30] });
+}
+
+function toggleClienteMapa(clienteId) {
+  if (clientesSeleccionadosMapa.has(clienteId)) clientesSeleccionadosMapa.delete(clienteId);
+  else clientesSeleccionadosMapa.add(clienteId);
+  actualizarMarcadorMapa(clienteId);
+  actualizarPanelSeleccionMapa();
+}
+
+function actualizarMarcadorMapa(clienteId) {
+  const marker = mapaRutasMarkers[clienteId];
+  const c = clients.find(x => x.id === clienteId);
+  if (!marker || !c) return;
+  const seleccionado = clientesSeleccionadosMapa.has(clienteId);
+  const color = seleccionado ? '#fbbf24' : (DIAS_COLOR[c.diaVisita || ""] || DIAS_COLOR[""]);
+  marker.setStyle({ fillColor: color, radius: seleccionado ? 11 : 8, weight: seleccionado ? 2 : 1 });
+}
+
+function renderPanelSeleccionMapaHTML() {
+  const seleccionados = [...clientesSeleccionadosMapa].map(id => clients.find(c => c.id === id)).filter(Boolean);
+  return `
+    <h3 class="section-title">🟡 Seleccionados: ${seleccionados.length}</h3>
+    ${seleccionados.length === 0
+      ? `<p class="muted">Tocá los puntitos del mapa para ir armando el grupo del día.</p>`
+      : `
+        <p class="muted" style="margin:0 0 8px;">${seleccionados.map(c => c.nombre).join(", ")}</p>
+        <div class="row-2">
+          <select id="selectDiaMapa">
+            <option value="">Elegí un día</option>
+            ${DIAS_VISITA.map(d => `<option value="${d}">${d}</option>`).join("")}
+          </select>
+          <button class="btn-success" onclick="aplicarDiaSeleccionMapa()">✅ Aplicar día</button>
+        </div>
+        <button class="btn-sm btn-outline" style="margin-top:8px;" onclick="limpiarSeleccionMapa()">✕ Limpiar selección</button>
+      `
+    }
+  `;
+}
+
+function actualizarPanelSeleccionMapa() {
+  const panel = document.getElementById("panelSeleccionMapa");
+  if (panel) panel.innerHTML = renderPanelSeleccionMapaHTML();
+}
+
+function limpiarSeleccionMapa() {
+  const idsPrevios = [...clientesSeleccionadosMapa];
+  clientesSeleccionadosMapa = new Set();
+  idsPrevios.forEach(id => actualizarMarcadorMapa(id));
+  actualizarPanelSeleccionMapa();
+}
+
+function aplicarDiaSeleccionMapa() {
+  const dia = document.getElementById("selectDiaMapa")?.value;
+  if (!dia) return alert("Elegí un día para este grupo.");
+  if (clientesSeleccionadosMapa.size === 0) return alert("Todavía no tildaste ningún cliente en el mapa.");
+
+  const idsPrevios = [...clientesSeleccionadosMapa];
+  idsPrevios.forEach(id => {
+    const c = clients.find(x => x.id === id);
+    if (c) { c.diaVisita = dia; c.actualizadoEn = Date.now(); }
+  });
+  guardarStorage();
+
+  clientesSeleccionadosMapa = new Set();
+  idsPrevios.forEach(id => actualizarMarcadorMapa(id));
+  actualizarPanelSeleccionMapa();
+  alert(`✅ Listo, se asignó "${dia}" a ${idsPrevios.length} cliente${idsPrevios.length > 1 ? "s" : ""}.`);
+}
+
+function renderVistaMapaRutas() {
   const cont = document.getElementById("vista-contenido");
   if (!cont) return;
 
+  clientesSeleccionadosMapa = new Set();
   const routeClients = clientesConUbicacionParaRuta();
   const sinUbicacion = clients.filter(c => !c.eliminado && (c.tipo || "Otro") !== "Otro" && !c.potencial && !(c.lat != null && c.lng != null && c.lat !== "" && c.lng !== ""));
 
   cont.innerHTML = `
     <div class="page-header">
       <button class="btn-back" onclick="setVista('clientes')">← Volver</button>
-      <h2 class="page-title2">🗺️ Organizar recorridos</h2>
+      <h2 class="page-title2">🗺️ Mapa de recorridos</h2>
     </div>
 
     <div class="form-card">
-      <p class="muted" style="margin:0 0 10px;">Agrupa a tus clientes por cercanía, usando la ubicación GPS que cargaste en cada uno. Tenés <strong>${routeClients.length}</strong> clientes con ubicación cargada, listos para agrupar.</p>
+      <p class="muted" style="margin:0 0 8px;">Tocá los puntos del mapa para ir armando un grupo — se ponen 🟡 dorados. Elegí el día abajo y aplicalo. Los puntos que ya tienen día asignado se ven con su color.</p>
 
       ${sinUbicacion.length > 0 ? `
-      <div style="background:#fef3c7; border-radius:10px; padding:10px; margin-bottom:12px;">
-        <p class="muted" style="margin:0 0 8px; color:#92400e;">⚠️ ${sinUbicacion.length} cliente${sinUbicacion.length > 1 ? "s" : ""} sin ubicación GPS. Si les cargaste la dirección escrita a mano, puedo intentar ubicarlos automáticamente:</p>
+      <div style="background:#fef3c7; border-radius:10px; padding:10px; margin-bottom:10px;">
+        <p class="muted" style="margin:0 0 8px; color:#92400e;">⚠️ ${sinUbicacion.length} cliente${sinUbicacion.length > 1 ? "s" : ""} sin ubicación GPS, no aparecen en el mapa. Si les cargaste la dirección escrita a mano, puedo intentar ubicarlos:</p>
         <button class="btn-primary btn-full" onclick="geocodificarDireccionesFaltantes()">📮 Ubicar direcciones cargadas a mano</button>
         <p id="progresoGeocoding" class="muted" style="margin-top:6px;"></p>
       </div>` : ""}
 
-      <div class="row-2">
-        <div class="form-group" style="margin:0;">
-          <label>Clientes por día (aprox.)</label>
-          <input id="inputClientesPorDia" type="number" min="1" value="${clientesPorDiaRuta}" />
-        </div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; font-size:12px; margin-bottom:8px;">
+        ${DIAS_VISITA.map(d => `<span style="display:flex; align-items:center; gap:4px;"><span style="width:10px; height:10px; border-radius:50%; background:${DIAS_COLOR[d]}; display:inline-block;"></span>${d}</span>`).join("")}
+        <span style="display:flex; align-items:center; gap:4px;"><span style="width:10px; height:10px; border-radius:50%; background:${DIAS_COLOR[""]}; display:inline-block;"></span>Sin día</span>
+        <span style="display:flex; align-items:center; gap:4px;"><span style="width:10px; height:10px; border-radius:50%; background:#fbbf24; display:inline-block;"></span>Seleccionado</span>
       </div>
-      <button class="btn-primary btn-full" style="margin-top:10px;" onclick="generarRutasSugeridas()">📍 Armar grupos por cercanía</button>
-      ${sinUbicacion.length > 0 ? `<p class="muted" style="margin-top:10px;">Clientes todavía sin ubicación: ${sinUbicacion.map(c => c.nombre).join(", ")}</p>` : ""}
+
+      <div id="mapaRutasContenedor" style="width:100%; height:360px; border-radius:12px; overflow:hidden; background:#f1f5f9; display:flex; align-items:center; justify-content:center;">
+        ${routeClients.length === 0 ? `<span class="muted">Todavía no tenés clientes con ubicación cargada.</span>` : `<span class="muted">Cargando mapa...</span>`}
+      </div>
     </div>
 
-    ${gruposRutasSugeridas ? gruposRutasSugeridas.map((g, idx) => `
-      <div class="form-card">
-        <h3 class="section-title">Grupo ${idx + 1} — ${g.clientes.length} clientes${g.aplicado ? ` (✅ asignado a ${g.diaAsignado})` : ""}</h3>
-        ${g.clientes.map(c => `
-          <div class="stock-row">
-            <div>
-              <div class="stock-nombre">${c.nombre}</div>
-              <div class="muted">${c.direccion || "sin dirección cargada"}</div>
-            </div>
-          </div>
-        `).join("")}
-        <div class="row-2" style="margin-top:10px;">
-          <select id="selectDiaGrupo-${idx}" onchange="asignarDiaGrupo(${idx}, this.value)">
-            <option value="">Elegí un día</option>
-            ${DIAS_VISITA.map(d => `<option value="${d}" ${g.diaAsignado === d ? "selected" : ""}>${d}</option>`).join("")}
-          </select>
-          <button class="btn-success" onclick="aplicarDiaGrupo(${idx})">✅ Aplicar día a este grupo</button>
-        </div>
-      </div>
-    `).join("") : ""}
+    <div class="form-card" id="panelSeleccionMapa">
+      ${renderPanelSeleccionMapaHTML()}
+    </div>
   `;
+
+  if (routeClients.length > 0) {
+    cargarLeaflet().then(() => {
+      inicializarMapaRutas();
+    }).catch(() => {
+      const el = document.getElementById("mapaRutasContenedor");
+      if (el) el.innerHTML = `<span class="muted">No se pudo cargar el mapa. Revisá tu conexión e intentá de nuevo.</span>`;
+    });
+  }
 }
 
 // ── Vista: FORMULARIO CLIENTE ─────────────────────────────────────────────────
