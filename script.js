@@ -89,25 +89,25 @@ function generarId() {
 
 // ── Catálogo por defecto ─────────────────────────────────────────────────────
 const defaultCatalog = [
-  { id: generarId(), nombre: "Bisglicinato de Magnesio", categoria: "Alunexa", precioVentaSinIVA: 10315, stock: 0 },
-  { id: generarId(), nombre: "Citrato de Magnesio", categoria: "Alunexa", precioVentaSinIVA: 9590, stock: 0 },
-  { id: generarId(), nombre: "Multimagnesio", categoria: "Alunexa", precioVentaSinIVA: 9150, stock: 0 },
-  { id: generarId(), nombre: "Magnesio", categoria: "Alunexa", precioVentaSinIVA: 7215, stock: 0 },
-  { id: generarId(), nombre: "Calcio, Magnesio y Vitamina D3", categoria: "Alunexa", precioVentaSinIVA: 7800, stock: 0 },
-  { id: generarId(), nombre: "Vitamina C, Zinc y Vitamina D", categoria: "Alunexa", precioVentaSinIVA: 8970, stock: 0 },
-  { id: generarId(), nombre: "Vitamina B12", categoria: "Alunexa", precioVentaSinIVA: 8000, stock: 0 },
-  { id: generarId(), nombre: "Colágeno Hidrolizado", categoria: "Alunexa", precioVentaSinIVA: 8850, stock: 0 },
-  { id: generarId(), nombre: "Resveratrol", categoria: "Alunexa", precioVentaSinIVA: 11375, stock: 0 },
-  { id: generarId(), nombre: "Cardo Mariano", categoria: "Fungimania", precioVentaSinIVA: 14500, stock: 0 },
-  { id: generarId(), nombre: "Tremella", categoria: "Fungimania", precioVentaSinIVA: 14500, stock: 0 },
-  { id: generarId(), nombre: "Ashwagandha", categoria: "Fungimania", precioVentaSinIVA: 14500, stock: 0 },
-  { id: generarId(), nombre: "Cordyceps", categoria: "Fungimania", precioVentaSinIVA: 14500, stock: 0 },
-  { id: generarId(), nombre: "Melena de León", categoria: "Fungimania", precioVentaSinIVA: 14500, stock: 0 },
-  { id: generarId(), nombre: "Reishi", categoria: "Fungimania", precioVentaSinIVA: 14500, stock: 0 },
-  { id: generarId(), nombre: "Almendra", categoria: "Vita", precioVentaSinIVA: 15000, stock: 0 },
-  { id: generarId(), nombre: "Chocolate", categoria: "Vita", precioVentaSinIVA: 15000, stock: 0 },
-  { id: generarId(), nombre: "Proteína", categoria: "Vita", precioVentaSinIVA: 17250, stock: 0 },
-  { id: generarId(), nombre: "Bites", categoria: "Vita", precioVentaSinIVA: 3150, stock: 0 }
+  { id: generarId(), nombre: "Bisglicinato de Magnesio", categoria: "Alunexa", precioVentaSinIVA: 10315, stock: 0, codigo: "100" },
+  { id: generarId(), nombre: "Citrato de Magnesio", categoria: "Alunexa", precioVentaSinIVA: 9590, stock: 0, codigo: "101" },
+  { id: generarId(), nombre: "Multimagnesio", categoria: "Alunexa", precioVentaSinIVA: 9150, stock: 0, codigo: "102" },
+  { id: generarId(), nombre: "Magnesio", categoria: "Alunexa", precioVentaSinIVA: 7215, stock: 0, codigo: "103" },
+  { id: generarId(), nombre: "Calcio, Magnesio y Vitamina D3", categoria: "Alunexa", precioVentaSinIVA: 7800, stock: 0, codigo: "104" },
+  { id: generarId(), nombre: "Vitamina C, Zinc y Vitamina D", categoria: "Alunexa", precioVentaSinIVA: 8970, stock: 0, codigo: "105" },
+  { id: generarId(), nombre: "Vitamina B12", categoria: "Alunexa", precioVentaSinIVA: 8000, stock: 0, codigo: "106" },
+  { id: generarId(), nombre: "Colágeno Hidrolizado", categoria: "Alunexa", precioVentaSinIVA: 8850, stock: 0, codigo: "107" },
+  { id: generarId(), nombre: "Resveratrol", categoria: "Alunexa", precioVentaSinIVA: 11375, stock: 0, codigo: "108" },
+  { id: generarId(), nombre: "Cardo Mariano", categoria: "Fungimania", precioVentaSinIVA: 14500, stock: 0, codigo: "200" },
+  { id: generarId(), nombre: "Tremella", categoria: "Fungimania", precioVentaSinIVA: 14500, stock: 0, codigo: "201" },
+  { id: generarId(), nombre: "Ashwagandha", categoria: "Fungimania", precioVentaSinIVA: 14500, stock: 0, codigo: "202" },
+  { id: generarId(), nombre: "Cordyceps", categoria: "Fungimania", precioVentaSinIVA: 14500, stock: 0, codigo: "203" },
+  { id: generarId(), nombre: "Melena de León", categoria: "Fungimania", precioVentaSinIVA: 14500, stock: 0, codigo: "204" },
+  { id: generarId(), nombre: "Reishi", categoria: "Fungimania", precioVentaSinIVA: 14500, stock: 0, codigo: "205" },
+  { id: generarId(), nombre: "Almendra", categoria: "Vita", precioVentaSinIVA: 15000, stock: 0, codigo: "300" },
+  { id: generarId(), nombre: "Chocolate", categoria: "Vita", precioVentaSinIVA: 15000, stock: 0, codigo: "301" },
+  { id: generarId(), nombre: "Proteína", categoria: "Vita", precioVentaSinIVA: 17250, stock: 0, codigo: "302" },
+  { id: generarId(), nombre: "Bites", categoria: "Vita", precioVentaSinIVA: 3150, stock: 0, codigo: "303" }
 ];
 
 const defaultClients = [
@@ -788,9 +788,78 @@ function autocompletarProducto() {
   `;
 }
 
+// Códigos sugeridos (100=Alunexa, 200=Fungimania, 300=Vita) para que la
+// búsqueda rápida funcione de entrada si el producto se llama igual que acá.
+// Si en Stock cargás un código distinto para alguno, ese manda por sobre
+// esta sugerencia.
+const CODIGOS_SUGERIDOS = {
+  "Bisglicinato de Magnesio": "100",
+  "Citrato de Magnesio": "101",
+  "Multimagnesio": "102",
+  "Magnesio": "103",
+  "Calcio, Magnesio y Vitamina D3": "104",
+  "Vitamina C, Zinc y Vitamina D": "105",
+  "Vitamina B12": "106",
+  "Colágeno Hidrolizado": "107",
+  "Resveratrol": "108",
+  "Cardo Mariano": "200",
+  "Tremella": "201",
+  "Ashwagandha": "202",
+  "Cordyceps": "203",
+  "Melena de León": "204",
+  "Reishi": "205",
+  "Almendra": "300",
+  "Chocolate": "301",
+  "Proteína": "302",
+  "Bites": "303"
+};
+
+function codigoDeProducto(p) {
+  if (p.codigo) return String(p.codigo);
+  return CODIGOS_SUGERIDOS[p.nombre] || "";
+}
+
 function cambiarFiltroCategoria() {
   filtroCategoria = document.getElementById("filtroCategoria").value;
   renderVistaPedido();
+}
+
+// Búsqueda rápida por código mientras Joel va tipeando en el campo de
+// pedido: si el código coincide con uno solo, selecciona el producto
+// directo. Si coincide con varios (por ejemplo tipeó "10" y hay 100-108),
+// muestra la lista para que siga tipeando.
+function buscarPorCodigo() {
+  const info = document.getElementById("infoCodigoProducto");
+  if (!info) return;
+  const val = document.getElementById("codigoProducto").value.trim();
+  if (!val) { info.textContent = ""; return; }
+
+  const exacto = catalog.filter(p => codigoDeProducto(p) && codigoDeProducto(p) === val);
+  if (exacto.length === 1) {
+    seleccionarProductoPorCodigo(exacto[0]);
+    info.innerHTML = `<span style="color:#059669;">✅ ${exacto[0].nombre}</span>`;
+    const cantInput = document.getElementById("cantidad");
+    if (cantInput) cantInput.focus();
+    return;
+  }
+
+  const parciales = catalog.filter(p => codigoDeProducto(p) && codigoDeProducto(p).startsWith(val));
+  if (parciales.length > 0) {
+    info.textContent = "Coincide con: " + parciales.slice(0, 6).map(p => p.codigo + " " + p.nombre).join(" · ") + (parciales.length > 6 ? "…" : "");
+    return;
+  }
+
+  info.innerHTML = `<span style="color:#dc2626;">Ningún producto con ese código</span>`;
+}
+
+function seleccionarProductoPorCodigo(prod) {
+  filtroCategoria = prod.categoria;
+  const catSelect = document.getElementById("filtroCategoria");
+  if (catSelect) catSelect.value = prod.categoria;
+  renderSelectProductos();
+  const prodSelect = document.getElementById("productoSelect");
+  if (prodSelect) prodSelect.value = prod.id;
+  autocompletarProducto();
 }
 
 // ── Items del pedido ──────────────────────────────────────────────────────────
@@ -850,6 +919,13 @@ function agregarItem() {
   if (descInput) { descInput.value = ""; }
   const descResult = document.getElementById("precioConDescuento");
   if (descResult) descResult.innerHTML = "";
+
+  // Dejamos listo el campo de código para el siguiente producto: escribís
+  // el próximo código (101, 102...) sin tener que tocar nada más.
+  const codigoInput = document.getElementById("codigoProducto");
+  if (codigoInput) { codigoInput.value = ""; codigoInput.focus(); }
+  const infoCodigo = document.getElementById("infoCodigoProducto");
+  if (infoCodigo) infoCodigo.innerHTML = "";
 }
 
 function actualizarCantidadItem(id, nuevaCant) {
@@ -1667,8 +1743,16 @@ function guardarPrecio(id) {
   const nuevoCosto = costoInput ? parseNumber(costoInput.value) : null;
   if (costoInput && costoInput.value.trim() !== "" && nuevoCosto < 0) return alert("El costo no puede ser negativo");
 
+  const codigoInput = document.getElementById("input-codigo-" + id);
+  const nuevoCodigo = codigoInput && codigoInput.value.trim() !== "" ? codigoInput.value.trim() : "";
+  if (nuevoCodigo) {
+    const repetido = catalog.find(p => p.id !== id && codigoDeProducto(p) === nuevoCodigo);
+    if (repetido) return alert(`El código ${nuevoCodigo} ya lo tiene "${repetido.nombre}". Elegí otro.`);
+  }
+
   prod.precioVentaSinIVA = nuevoPrecio;
   if (costoInput && costoInput.value.trim() !== "") prod.costo = nuevoCosto;
+  prod.codigo = nuevoCodigo;
   prod.actualizadoEn = Date.now();
   guardarStorage();
   renderVistaStock();
@@ -2555,6 +2639,12 @@ function renderVistaPedido() {
 
     <div class="form-card">
       <h3 class="section-title">Agregar producto</h3>
+
+      <div class="form-group">
+        <label>Código (opcional, para cargar más rápido)</label>
+        <input id="codigoProducto" type="number" placeholder="Ej: 100" inputmode="numeric" oninput="buscarPorCodigo()" />
+        <div id="infoCodigoProducto" class="muted" style="margin-top:4px; font-size:13px;"></div>
+      </div>
 
       <div class="form-group">
         <label>Marca / categoría</label>
@@ -3828,21 +3918,26 @@ function renderVistaStock() {
       ${catalogFiltrado.map(p => {
         const claseStock = p.stock === 0 ? 'text-red' : (p.stock <= STOCK_BAJO_UMBRAL ? 'text-orange' : 'text-green');
         const costoActual = costoDeProducto(p);
+        const codigoActual = codigoDeProducto(p);
         return `
         <div class="stock-row">
           <div style="flex:1;">
-            <div class="stock-nombre">${p.nombre}</div>
+            <div class="stock-nombre">${codigoActual ? `#${codigoActual} · ` : ""}${p.nombre}</div>
             <div class="muted">${p.categoria} · s/IVA: ${formatCurrency(p.precioVentaSinIVA)} · Costo: ${costoActual > 0 ? formatCurrency(costoActual) : "sin cargar ⚠️"}</div>
             <div id="form-precio-${p.id}" style="display:none; margin-top:8px;">
               <div class="row-2">
                 <div class="form-group" style="margin:0;">
+                  <label>Código</label>
+                  <input id="input-codigo-${p.id}" type="number" placeholder="Ej: 100" value="${codigoActual}" />
+                </div>
+                <div class="form-group" style="margin:0;">
                   <label>Precio de venta (s/IVA)</label>
                   <input id="input-precio-${p.id}" type="number" placeholder="Precio de venta" value="${p.precioVentaSinIVA}" />
                 </div>
-                <div class="form-group" style="margin:0;">
-                  <label>Costo (lo que pagás vos)</label>
-                  <input id="input-costo-${p.id}" type="number" placeholder="Costo de compra" value="${costoActual || ""}" />
-                </div>
+              </div>
+              <div class="form-group" style="margin:8px 0 0;">
+                <label>Costo (lo que pagás vos)</label>
+                <input id="input-costo-${p.id}" type="number" placeholder="Costo de compra" value="${costoActual || ""}" />
               </div>
               <button class="btn-success btn-full" style="margin-top:6px;" onclick="guardarPrecio('${p.id}')">Guardar</button>
             </div>
