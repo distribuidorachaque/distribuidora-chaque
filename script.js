@@ -857,9 +857,17 @@ function seleccionarProductoPorCodigo(prod) {
   const catSelect = document.getElementById("filtroCategoria");
   if (catSelect) catSelect.value = prod.categoria;
   renderSelectProductos();
+  actualizarVisibilidadDescuento();
   const prodSelect = document.getElementById("productoSelect");
   if (prodSelect) prodSelect.value = prod.id;
   autocompletarProducto();
+}
+
+// Muestra u oculta el cuadro de descuento de Vita sin tener que refrescar
+// toda la pantalla del pedido (así no se pierde lo que estabas tipeando).
+function actualizarVisibilidadDescuento() {
+  const el = document.getElementById("descuentoBoxContainer");
+  if (el) el.style.display = filtroCategoria === "Vita" ? "block" : "none";
 }
 
 // ── Items del pedido ──────────────────────────────────────────────────────────
@@ -2295,8 +2303,15 @@ function clientesConUbicacionParaRuta() {
 // ciudad suelen confundir al buscador.
 async function geocodificarDireccion(direccion) {
   try {
+    // "Santa Fe" es nombre de ciudad Y de provincia a la vez, así que una
+    // búsqueda de texto suelto a veces devuelve una calle con el mismo
+    // nombre en OTRA ciudad de la provincia (por ejemplo Rosario). Para
+    // evitarlo, acotamos la búsqueda a un rectángulo geográfico alrededor
+    // de Santa Fe capital y le pedimos que NO devuelva nada fuera de esa zona.
+    const viewboxSantaFeCapital = "-60.85,-31.55,-60.55,-31.75"; // izq,arriba,der,abajo
     const query = encodeURIComponent(direccion + ", Santa Fe, Argentina");
-    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${query}`);
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${query}&viewbox=${viewboxSantaFeCapital}&bounded=1`;
+    const res = await fetch(url);
     const data = await res.json();
     if (data && data.length > 0) {
       return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
@@ -2308,6 +2323,55 @@ async function geocodificarDireccion(direccion) {
 }
 
 let geocodificandoDirecciones = false;
+
+// Detecta clientes cuya ubicación quedó FUERA de la zona de Santa Fe
+// capital — probablemente geolocalizados mal por la confusión entre la
+// ciudad y la provincia (por ejemplo, terminaron en Rosario).
+function clientesConUbicacionSospechosa() {
+  const [lonMin, latMax, lonMax, latMin] = "-60.85,-31.55,-60.55,-31.75".split(",").map(Number);
+  return clients.filter(c =>
+    !c.eliminado && (c.tipo || "Otro") !== "Otro" && !c.potencial &&
+    c.lat != null && c.lng != null && c.lat !== "" && c.lng !== "" &&
+    (Number(c.lat) < latMin || Number(c.lat) > latMax || Number(c.lng) < lonMin || Number(c.lng) > lonMax)
+  );
+}
+
+async function corregirUbicacionesSospechosas() {
+  if (geocodificandoDirecciones) return;
+  const sospechosos = clientesConUbicacionSospechosa();
+  if (sospechosos.length === 0) return alert("No encontré clientes con ubicación fuera de Santa Fe capital.");
+  if (!confirm(`Encontré ${sospechosos.length} cliente${sospechosos.length > 1 ? "s" : ""} con ubicación fuera de Santa Fe capital (puede que hayan quedado mal ubicados por la confusión ciudad/provincia). ¿Los vuelvo a ubicar?`)) return;
+
+  geocodificandoDirecciones = true;
+  let corregidos = 0;
+  const noEncontrados = [];
+
+  for (let i = 0; i < sospechosos.length; i++) {
+    const c = sospechosos[i];
+    const progresoEl = document.getElementById("progresoGeocoding");
+    if (progresoEl) progresoEl.textContent = `Corrigiendo ${i + 1} de ${sospechosos.length}: ${c.nombre}...`;
+
+    if (!c.direccion || !c.direccion.trim()) {
+      noEncontrados.push(c.nombre + " (sin dirección cargada)");
+    } else {
+      const coords = await geocodificarDireccion(c.direccion);
+      if (coords) {
+        c.lat = coords.lat;
+        c.lng = coords.lng;
+        c.actualizadoEn = Date.now();
+        corregidos++;
+      } else {
+        noEncontrados.push(c.nombre);
+      }
+    }
+    if (i < sospechosos.length - 1) await new Promise(r => setTimeout(r, 1100));
+  }
+
+  geocodificandoDirecciones = false;
+  guardarStorage();
+  alert(`✅ Se corrigieron ${corregidos} de ${sospechosos.length}.${noEncontrados.length > 0 ? `\n\nNo se pudieron corregir solas (revisalas a mano o usá "Usar mi ubicación" estando ahí): ${noEncontrados.join(", ")}` : ""}`);
+  renderVistaMapaRutas();
+}
 
 async function geocodificarDireccionesFaltantes() {
   if (geocodificandoDirecciones) return;
@@ -2485,6 +2549,7 @@ function renderVistaMapaRutas() {
   clientesSeleccionadosMapa = new Set();
   const routeClients = clientesConUbicacionParaRuta();
   const sinUbicacion = clients.filter(c => !c.eliminado && (c.tipo || "Otro") !== "Otro" && !c.potencial && !(c.lat != null && c.lng != null && c.lat !== "" && c.lng !== ""));
+  const sospechosos = clientesConUbicacionSospechosa();
 
   cont.innerHTML = `
     <div class="page-header">
@@ -2494,6 +2559,12 @@ function renderVistaMapaRutas() {
 
     <div class="form-card">
       <p class="muted" style="margin:0 0 8px;">Tocá los puntos del mapa para ir armando un grupo — se ponen 🟡 dorados. Elegí el día abajo y aplicalo. Los puntos que ya tienen día asignado se ven con su color.</p>
+
+      ${sospechosos.length > 0 ? `
+      <div style="background:#fee2e2; border-radius:10px; padding:10px; margin-bottom:10px;">
+        <p class="muted" style="margin:0 0 8px; color:#991b1b;">🚨 ${sospechosos.length} cliente${sospechosos.length > 1 ? "s" : ""} con ubicación fuera de Santa Fe capital (puede que hayan quedado mal ubicados, por ejemplo en Rosario, por una calle con el mismo nombre): ${sospechosos.map(c => c.nombre).join(", ")}</p>
+        <button class="btn-primary btn-full" onclick="corregirUbicacionesSospechosas()">🔧 Corregir estas ubicaciones</button>
+      </div>` : ""}
 
       ${sinUbicacion.length > 0 ? `
       <div style="background:#fef3c7; border-radius:10px; padding:10px; margin-bottom:10px;">
@@ -2670,14 +2741,13 @@ function renderVistaPedido() {
         </div>
       </div>
 
-      ${filtroCategoria === "Vita" ? `
-      <div class="descuento-box">
+      <div id="descuentoBoxContainer" class="descuento-box" style="display:${filtroCategoria === "Vita" ? "block" : "none"};">
         <label>🏷️ Descuento Vita (%)</label>
         <div class="row-2" style="margin-top:6px;">
           <input id="descuentoPct" type="number" min="0" max="100" placeholder="Ej: 10" oninput="aplicarDescuento()" />
           <div id="precioConDescuento" class="precio-descuento-resultado"></div>
         </div>
-      </div>` : ""}
+      </div>
 
       <button class="btn-primary btn-full" onclick="agregarItem()">+ Agregar al pedido</button>
 
