@@ -441,7 +441,11 @@ async function cargarDatos() {
   inversiones = fusionarPorId(inversiones, []);
 
   guardarLocal();
-  renderApp();
+  // Si el usuario ya está completando un formulario (cargando un cliente o
+  // armando un pedido) justo cuando termina de sincronizar, no le pisamos
+  // la pantalla — los datos ya quedaron guardados igual, se van a ver la
+  // próxima vez que cambie de pantalla.
+  if (vistaActual !== "form-cliente" && vistaActual !== "pedido") renderApp();
   syncEnCurso = false;
 
   // Si después de fusionar y deduplicar quedó más de lo que Drive tenía
@@ -635,6 +639,8 @@ function usarMiUbicacion() {
       const { latitude, longitude } = pos.coords;
       document.getElementById("formClienteLat").value = latitude;
       document.getElementById("formClienteLng").value = longitude;
+      const manualFlag = document.getElementById("formClienteUbicacionManual");
+      if (manualFlag) manualFlag.value = "1";
 
       try {
         const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&addressdetails=1`;
@@ -691,6 +697,7 @@ function guardarCliente() {
   const lngVal = document.getElementById("formClienteLng")?.value;
   const lat = latVal ? parseFloat(latVal) : null;
   const lng = lngVal ? parseFloat(lngVal) : null;
+  const ubicacionManual = document.getElementById("formClienteUbicacionManual")?.value === "1";
 
   if (!nombre) return alert("Escribí el nombre del cliente");
   if (!tipo) return alert("Elegí un tipo de comercio");
@@ -719,9 +726,9 @@ function guardarCliente() {
 
   if (editandoClienteId) {
     const c = clients.find(c => c.id === editandoClienteId);
-    if (c) Object.assign(c, { nombre, tipo, diaVisita, horario, frecuencia, telefono, telefono2, email, direccion, potencial, seguimiento, lat, lng, actualizadoEn: Date.now() });
+    if (c) Object.assign(c, { nombre, tipo, diaVisita, horario, frecuencia, telefono, telefono2, email, direccion, potencial, seguimiento, lat, lng, ubicacionManual, actualizadoEn: Date.now() });
   } else {
-    clients.unshift({ id: generarId(), nombre, tipo, diaVisita, horario, frecuencia, telefono, telefono2, email, direccion, notas: "", potencial, seguimiento, lat, lng, actualizadoEn: Date.now() });
+    clients.unshift({ id: generarId(), nombre, tipo, diaVisita, horario, frecuencia, telefono, telefono2, email, direccion, notas: "", potencial, seguimiento, lat, lng, ubicacionManual, actualizadoEn: Date.now() });
   }
 
   guardarStorage();
@@ -832,12 +839,12 @@ function buscarPorCodigo() {
   const info = document.getElementById("infoCodigoProducto");
   if (!info) return;
   const val = document.getElementById("codigoProducto").value.trim();
-  if (!val) { info.textContent = ""; return; }
+  if (!val) { info.innerHTML = ""; return; }
 
   const exacto = catalog.filter(p => codigoDeProducto(p) && codigoDeProducto(p) === val);
   if (exacto.length === 1) {
     seleccionarProductoPorCodigo(exacto[0]);
-    info.innerHTML = `<span style="color:#059669;">✅ ${exacto[0].nombre}</span>`;
+    mostrarProductoConfirmado(exacto[0]);
     const cantInput = document.getElementById("cantidad");
     if (cantInput) cantInput.focus();
     return;
@@ -845,11 +852,61 @@ function buscarPorCodigo() {
 
   const parciales = catalog.filter(p => codigoDeProducto(p) && codigoDeProducto(p).startsWith(val));
   if (parciales.length > 0) {
-    info.textContent = "Coincide con: " + parciales.slice(0, 6).map(p => p.codigo + " " + p.nombre).join(" · ") + (parciales.length > 6 ? "…" : "");
+    info.innerHTML = `
+      <div style="border:1px solid #e5e7eb; border-radius:10px; overflow:hidden;">
+        ${parciales.slice(0, 6).map(p => `
+          <div onclick="elegirCodigoDeLaLista('${p.id}')" style="padding:10px 12px; border-bottom:1px solid #f0f0f0; cursor:pointer; display:flex; justify-content:space-between; align-items:center;">
+            <div><strong>${codigoDeProducto(p)}</strong> — ${p.nombre}</div>
+            <div class="muted" style="font-size:13px;">${formatCurrency(p.precioVentaSinIVA)}</div>
+          </div>
+        `).join("")}
+      </div>
+      ${parciales.length > 6 ? `<p class="muted" style="margin-top:4px; font-size:12px;">Seguí tipeando para acotar (${parciales.length} coinciden)</p>` : ""}
+    `;
     return;
   }
 
-  info.innerHTML = `<span style="color:#dc2626;">Ningún producto con ese código</span>`;
+  info.innerHTML = `<div style="color:#dc2626; font-size:14px; padding:8px 0;">⚠️ Ningún producto con ese código</div>`;
+}
+
+// Tarjeta grande y clara confirmando qué producto quedó seleccionado — así
+// nunca hay dudas de qué estás por cargar antes de poner la cantidad.
+function mostrarProductoConfirmado(prod) {
+  const info = document.getElementById("infoCodigoProducto");
+  if (!info) return;
+  const stockTxt = prod.stock === 0 ? `<span style="color:#dc2626;">sin stock</span>` : (prod.stock <= STOCK_BAJO_UMBRAL ? `<span style="color:#d97706;">stock bajo: ${prod.stock}</span>` : `stock: ${prod.stock}`);
+  info.innerHTML = `
+    <div style="background:#ecfdf5; border:1px solid #059669; border-radius:10px; padding:10px 12px;">
+      <div style="font-size:16px; font-weight:600; color:#065f46;">✅ ${prod.nombre}</div>
+      <div class="muted" style="font-size:13px; margin-top:2px;">${formatCurrency(prod.precioVentaSinIVA)} · ${stockTxt}</div>
+    </div>
+  `;
+}
+
+// Tocar una de las coincidencias de la lista de código parcial la selecciona
+// directo, igual que si hubieras terminado de tipear el código exacto.
+function elegirCodigoDeLaLista(prodId) {
+  const prod = catalog.find(p => p.id === prodId);
+  if (!prod) return;
+  document.getElementById("codigoProducto").value = codigoDeProducto(prod);
+  seleccionarProductoPorCodigo(prod);
+  mostrarProductoConfirmado(prod);
+  const cantInput = document.getElementById("cantidad");
+  if (cantInput) cantInput.focus();
+}
+
+// Al apretar Enter en el campo de código: si ya hay uno solo coincidiendo,
+// lo confirma; si hay varios, no hace nada (elegís de la lista con el dedo).
+function confirmarCodigoConEnter() {
+  const val = document.getElementById("codigoProducto")?.value.trim();
+  if (!val) return;
+  const parciales = catalog.filter(p => codigoDeProducto(p) && codigoDeProducto(p).startsWith(val));
+  if (parciales.length === 1) {
+    elegirCodigoDeLaLista(parciales[0].id);
+  } else {
+    const cantInput = document.getElementById("cantidad");
+    if (cantInput && document.getElementById("productoSelect")?.value) cantInput.focus();
+  }
 }
 
 function seleccionarProductoPorCodigo(prod) {
@@ -2331,6 +2388,7 @@ function clientesConUbicacionSospechosa() {
   const [lonMin, latMax, lonMax, latMin] = "-60.85,-31.55,-60.55,-31.75".split(",").map(Number);
   return clients.filter(c =>
     !c.eliminado && (c.tipo || "Otro") !== "Otro" && !c.potencial &&
+    !c.ubicacionManual && // el GPS capturado a mano nunca se toca, esté donde esté
     c.lat != null && c.lng != null && c.lat !== "" && c.lng !== "" &&
     (Number(c.lat) < latMin || Number(c.lat) > latMax || Number(c.lng) < lonMin || Number(c.lng) > lonMax)
   );
@@ -2663,6 +2721,7 @@ function renderVistaFormCliente() {
         </div>
         <input type="hidden" id="formClienteLat" value="${c && c.lat ? c.lat : ""}" />
         <input type="hidden" id="formClienteLng" value="${c && c.lng ? c.lng : ""}" />
+        <input type="hidden" id="formClienteUbicacionManual" value="${c && c.ubicacionManual ? "1" : ""}" />
       </div>
 
       <div class="form-group potencial-box">
@@ -2712,10 +2771,15 @@ function renderVistaPedido() {
       <h3 class="section-title">Agregar producto</h3>
 
       <div class="form-group">
-        <label>Código (opcional, para cargar más rápido)</label>
-        <input id="codigoProducto" type="number" placeholder="Ej: 100" inputmode="numeric" oninput="buscarPorCodigo()" />
-        <div id="infoCodigoProducto" class="muted" style="margin-top:4px; font-size:13px;"></div>
+        <label>Código</label>
+        <input id="codigoProducto" type="number" placeholder="Ej: 100" inputmode="numeric" autocomplete="off"
+               oninput="buscarPorCodigo()"
+               onkeydown="if(event.key==='Enter'){ event.preventDefault(); confirmarCodigoConEnter(); }" />
+        <div id="infoCodigoProducto" style="margin-top:6px;"></div>
       </div>
+
+      <details style="margin-bottom:14px;">
+        <summary class="muted" style="cursor:pointer; font-size:13px;">¿No sabés el código? Buscar por nombre</summary>
 
       <div class="form-group">
         <label>Marca / categoría</label>
@@ -2729,11 +2793,13 @@ function renderVistaPedido() {
         <select id="productoSelect" onchange="autocompletarProducto()"></select>
         <div id="infoPrecioProducto" class="price-hints"></div>
       </div>
+      </details>
 
       <div class="row-2">
         <div class="form-group">
           <label>Cantidad</label>
-          <input id="cantidad" type="number" min="0" placeholder="Cant." />
+          <input id="cantidad" type="number" min="0" placeholder="Cant." inputmode="numeric"
+                 onkeydown="if(event.key==='Enter'){ event.preventDefault(); agregarItem(); }" />
         </div>
         <div class="form-group">
           <label>Precio sin IVA</label>
