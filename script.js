@@ -2751,6 +2751,32 @@ function renderVistaFormCliente() {
 }
 
 // ── Vista: PEDIDO ─────────────────────────────────────────────────────────────
+// Mantiene el botón "+ Agregar al pedido" siempre pegado justo arriba del
+// teclado del celular, sea cual sea su altura real — así nunca queda ni
+// tapado ni flotando en un lugar raro cuando el teclado se abre o se cierra.
+let vvListenerInstalado = false;
+function ajustarBotonAgregarSobreTeclado() {
+  const btn = document.getElementById("btnAgregarPedido");
+  if (!btn) return;
+
+  if (!window.visualViewport) {
+    btn.style.bottom = "66px"; // navegador sin soporte: dejamos la posición fija de siempre
+    return;
+  }
+
+  const vv = window.visualViewport;
+  // Espacio que quedó tapado por el teclado (o por la barra de direcciones)
+  const tapado = window.innerHeight - vv.height - vv.offsetTop;
+  // Si el teclado está cerrado, lo dejamos apenas arriba de la barra de navegación de abajo
+  btn.style.bottom = Math.max(tapado, 0) + (tapado > 40 ? 8 : 66) + "px";
+
+  if (!vvListenerInstalado) {
+    vvListenerInstalado = true;
+    vv.addEventListener("resize", ajustarBotonAgregarSobreTeclado);
+    vv.addEventListener("scroll", ajustarBotonAgregarSobreTeclado);
+  }
+}
+
 function renderVistaPedido() {
   const cont   = document.getElementById("vista-contenido");
   const client = clients.find(c => c.id === clienteActivoId);
@@ -2815,7 +2841,8 @@ function renderVistaPedido() {
         </div>
       </div>
 
-      <button type="submit" class="btn-primary btn-full">+ Agregar al pedido</button>
+      <button type="submit" id="btnAgregarPedido" class="btn-primary btn-full" style="position:fixed; left:16px; right:16px; max-width:568px; margin:0 auto; bottom:66px; z-index:60; box-shadow:0 4px 14px rgba(0,0,0,0.25);">+ Agregar al pedido</button>
+      <div style="height:64px;"></div>
       </form>
 
       <div class="borrador-switch">
@@ -2875,6 +2902,7 @@ function renderVistaPedido() {
 
   renderSelectProductos();
   renderPedido();
+  ajustarBotonAgregarSobreTeclado();
 }
 
 // ── Vista: HISTORIAL ──────────────────────────────────────────────────────────
