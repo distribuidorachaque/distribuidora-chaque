@@ -2770,6 +2770,7 @@ function renderVistaPedido() {
     <div class="form-card">
       <h3 class="section-title">Agregar producto</h3>
 
+      <form onsubmit="event.preventDefault(); agregarItem();">
       <div class="form-group">
         <label>Código</label>
         <input id="codigoProducto" type="number" placeholder="Ej: 100" inputmode="numeric" autocomplete="off"
@@ -2798,8 +2799,7 @@ function renderVistaPedido() {
       <div class="row-2">
         <div class="form-group">
           <label>Cantidad</label>
-          <input id="cantidad" type="number" min="0" placeholder="Cant." inputmode="numeric"
-                 onkeydown="if(event.key==='Enter'){ event.preventDefault(); agregarItem(); }" />
+          <input id="cantidad" type="number" min="0" placeholder="Cant." inputmode="numeric" enterkeyhint="done" />
         </div>
         <div class="form-group">
           <label>Precio sin IVA</label>
@@ -2815,11 +2815,8 @@ function renderVistaPedido() {
         </div>
       </div>
 
-      <div style="height:64px;"></div>
-      <button class="btn-primary" onclick="agregarItem()"
-              style="position:fixed; left:16px; right:16px; bottom:66px; max-width:568px; margin:0 auto; z-index:60; box-shadow:0 4px 14px rgba(0,0,0,0.25);">
-        + Agregar al pedido
-      </button>
+      <button type="submit" class="btn-primary btn-full">+ Agregar al pedido</button>
+      </form>
 
       <div class="borrador-switch">
         <label class="switch-label">
