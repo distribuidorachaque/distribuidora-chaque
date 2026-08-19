@@ -2815,7 +2815,11 @@ function renderVistaPedido() {
         </div>
       </div>
 
-      <button class="btn-primary btn-full" onclick="agregarItem()">+ Agregar al pedido</button>
+      <div style="height:64px;"></div>
+      <button class="btn-primary" onclick="agregarItem()"
+              style="position:fixed; left:16px; right:16px; bottom:66px; max-width:568px; margin:0 auto; z-index:60; box-shadow:0 4px 14px rgba(0,0,0,0.25);">
+        + Agregar al pedido
+      </button>
 
       <div class="borrador-switch">
         <label class="switch-label">
