@@ -786,11 +786,12 @@ function autocompletarProducto() {
   const cantInput = document.getElementById("cantidad");
   if (cantInput) cantInput.value = "";
   const info = document.getElementById("infoPrecioProducto");
-  const claseHint = prod.stock === 0 ? 'hint-agotado' : (prod.stock <= STOCK_BAJO_UMBRAL ? 'hint-bajo' : '');
+  const disponible = getDisponibleParaAgregar(prod.id);
+  const claseHint = disponible <= 0 ? 'hint-agotado' : (disponible <= STOCK_BAJO_UMBRAL ? 'hint-bajo' : '');
   if (info) info.innerHTML = `
     <span class="price-hint">s/IVA: ${formatCurrency(prod.precioVentaSinIVA)}</span>
     <span class="price-hint">c/IVA: ${formatCurrency(priceWithIVA(prod.precioVentaSinIVA))}</span>
-    <span class="price-hint stock-hint ${claseHint}">Stock: ${prod.stock}${prod.stock > 0 && prod.stock <= STOCK_BAJO_UMBRAL ? ' ⚠️' : ''}</span>
+    <span class="price-hint stock-hint ${claseHint}">Disponible: ${disponible}${disponible > 0 && disponible <= STOCK_BAJO_UMBRAL ? ' ⚠️' : ''}</span>
     ${IMAGENES_PRODUCTO[prod.nombre] ? `<button type="button" class="price-hint" style="border:none; cursor:pointer;" onclick="mostrarImagenProducto('${prod.nombre}')">📷 Ver imagen</button>` : ''}
   `;
 }
@@ -887,7 +888,11 @@ function buscarPorCodigo() {
 function mostrarProductoConfirmado(prod) {
   const info = document.getElementById("infoCodigoProducto");
   if (!info) return;
-  const stockTxt = prod.stock === 0 ? `<span style="color:#dc2626;">sin stock</span>` : (prod.stock <= STOCK_BAJO_UMBRAL ? `<span style="color:#d97706;">stock bajo: ${prod.stock}</span>` : `stock: ${prod.stock}`);
+  const disponible = getDisponibleParaAgregar(prod.id);
+  const reservado = prod.stock - disponible;
+  const stockTxt = disponible <= 0
+    ? `<span style="color:#dc2626;">sin disponible${reservado > 0 ? " (ya reservado en borradores)" : ""}</span>`
+    : (disponible <= STOCK_BAJO_UMBRAL ? `<span style="color:#d97706;">disponible: ${disponible}</span>` : `disponible: ${disponible}`);
   info.innerHTML = `
     <div style="background:#ecfdf5; border:1px solid #059669; border-radius:10px; padding:10px 12px;">
       <div style="font-size:16px; font-weight:600; color:#065f46;">✅ ${prod.nombre}</div>
@@ -944,8 +949,14 @@ function actualizarVisibilidadDescuento() {
 function getDisponibleParaAgregar(productId) {
   const prod = catalog.find(p => p.id === productId);
   if (!prod) return 0;
-  const usado = currentItems.filter(i => i.productId === productId).reduce((a, i) => a + i.cantidad, 0);
-  return prod.stock - usado;
+  const usadoEnPedidoActual = currentItems.filter(i => i.productId === productId).reduce((a, i) => a + i.cantidad, 0);
+  // Lo que ya está "prometido" en otros pedidos que quedaron en borrador
+  // (todavía no descontaron stock de verdad, pero ya no está disponible
+  // para ofrecerle a otro cliente el mismo día).
+  const reservadoEnBorradores = orders
+    .filter(o => o.borrador && !o.eliminado && o.id !== editingOrderId)
+    .reduce((acc, o) => acc + o.items.filter(i => i.productId === productId).reduce((a, i) => a + i.cantidad, 0), 0);
+  return prod.stock - usadoEnPedidoActual - reservadoEnBorradores;
 }
 
 function agregarItem() {
