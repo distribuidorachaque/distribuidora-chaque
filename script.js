@@ -866,15 +866,15 @@ function buscarPorCodigo() {
   const parciales = catalog.filter(p => codigoDeProducto(p) && codigoDeProducto(p).startsWith(val));
   if (parciales.length > 0) {
     info.innerHTML = `
-      <div style="border:1px solid #e5e7eb; border-radius:10px; overflow:hidden;">
-        ${parciales.slice(0, 6).map(p => `
+      <div style="border:1px solid #e5e7eb; border-radius:10px; overflow-y:auto; max-height:260px;">
+        ${parciales.map(p => `
           <div onclick="elegirCodigoDeLaLista('${p.id}')" style="padding:10px 12px; border-bottom:1px solid #f0f0f0; cursor:pointer; display:flex; justify-content:space-between; align-items:center;">
             <div><strong>${codigoDeProducto(p)}</strong> — ${p.nombre}</div>
             <div class="muted" style="font-size:13px;">${formatCurrency(p.precioVentaSinIVA)}</div>
           </div>
         `).join("")}
       </div>
-      ${parciales.length > 6 ? `<p class="muted" style="margin-top:4px; font-size:12px;">Seguí tipeando para acotar (${parciales.length} coinciden)</p>` : ""}
+      <p class="muted" style="margin-top:4px; font-size:12px;">${parciales.length} coincidencia${parciales.length > 1 ? "s" : ""}${parciales.length > 5 ? " — deslizá para ver todas" : ""}</p>
     `;
     return;
   }
@@ -1469,6 +1469,37 @@ function calcularVentasUltimosMeses(mesFin, anioFin, cantidad) {
     resultado.push({ mes: m, anio: a, nombreMes: nombreMes.replace(".", ""), total, meta });
   }
   return resultado;
+}
+
+// Ranking de lo que más se vende dentro de una marca puntual — pensado para
+// saber qué reponer. Se ordena por CANTIDAD vendida (no por plata), que es
+// lo que importa a la hora de hacer el pedido al distribuidor.
+function calcularRankingVentasMarca(marca, soloEsteMes) {
+  const hoy = new Date();
+  const mesActual = hoy.getMonth() + 1, anioActual = hoy.getFullYear();
+  const porProducto = {};
+  orders.forEach(o => {
+    if (o.borrador || o.eliminado) return;
+    if (soloEsteMes) {
+      const partes = o.fecha.replace(/,.*/, "").split("/");
+      if (parseInt(partes[1]) !== mesActual || parseInt(partes[2]) !== anioActual) return;
+    }
+    o.items.forEach(i => {
+      if (i.categoria !== marca) return;
+      if (!porProducto[i.nombre]) porProducto[i.nombre] = { cantidad: 0, total: 0 };
+      porProducto[i.nombre].cantidad += i.cantidad;
+      porProducto[i.nombre].total += i.subtotalSinIVA;
+    });
+  });
+  return Object.entries(porProducto)
+    .map(([nombre, d]) => ({ nombre, ...d }))
+    .sort((a, b) => b.cantidad - a.cantidad);
+}
+
+let modoRankingStock = "mes";
+function cambiarModoRankingStock(modo) {
+  modoRankingStock = modo;
+  renderVistaStock();
 }
 
 function calcularTopClientes(limite) {
@@ -4100,6 +4131,31 @@ function renderVistaStock() {
       `;
       }).join("")}
     </div>
+
+    ${filtroStock !== "Todas" ? (() => {
+      const ranking = calcularRankingVentasMarca(filtroStock, modoRankingStock === "mes");
+      const medallas = ["🥇", "🥈", "🥉"];
+      return `
+      <div class="form-card">
+        <h3 class="section-title">🏆 Lo que más vendés de ${filtroStock}</h3>
+        <div class="tipo-tabs" style="margin-bottom:10px;">
+          <button class="tipo-tab ${modoRankingStock === "mes" ? "active" : ""}" onclick="cambiarModoRankingStock('mes')">Este mes</button>
+          <button class="tipo-tab ${modoRankingStock === "acumulado" ? "active" : ""}" onclick="cambiarModoRankingStock('acumulado')">Acumulado</button>
+        </div>
+        ${ranking.length === 0
+          ? `<div class="muted">Todavía no hay ventas de ${filtroStock} ${modoRankingStock === "mes" ? "este mes" : "registradas"}.</div>`
+          : ranking.map((p, i) => `
+            <div class="stock-row">
+              <div>
+                <div class="stock-nombre">${medallas[i] || (i + 1) + "."} ${p.nombre}</div>
+                <div class="muted">${formatCurrency(p.total)}</div>
+              </div>
+              <strong>${p.cantidad} u</strong>
+            </div>
+          `).join("")
+        }
+      </div>`;
+    })() : ""}
 
     ${filtroStock !== "Todas" ? (() => {
       const inversionesMarca = inversiones.filter(i => i.marca === filtroStock && !i.eliminado).sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
