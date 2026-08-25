@@ -821,9 +821,22 @@ const CODIGOS_SUGERIDOS = {
   "Bites": "303"
 };
 
+// Compara nombres de producto sin importar mayúsculas, tildes o espacios de
+// más, para que el código de respaldo funcione aunque el nombre real en tu
+// catálogo esté escrito un poco distinto al de la lista sugerida.
+function normalizarNombreProducto(s) {
+  return (s || "")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // saca tildes
+    .toLowerCase().trim().replace(/\s+/g, " ");
+}
+const CODIGOS_SUGERIDOS_NORM = Object.fromEntries(
+  Object.entries(CODIGOS_SUGERIDOS).map(([nombre, cod]) => [normalizarNombreProducto(nombre), cod])
+);
+
 function codigoDeProducto(p) {
   if (p.codigo) return String(p.codigo);
-  return CODIGOS_SUGERIDOS[p.nombre] || "";
+  if (CODIGOS_SUGERIDOS[p.nombre]) return CODIGOS_SUGERIDOS[p.nombre];
+  return CODIGOS_SUGERIDOS_NORM[normalizarNombreProducto(p.nombre)] || "";
 }
 
 function cambiarFiltroCategoria() {
