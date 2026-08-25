@@ -3051,6 +3051,42 @@ function elegirMedioPagoDeuda(id, medio) {
   document.getElementById("medioTransferenciaDeuda-" + id).classList.toggle("active", medio === "Transferencia");
 }
 
+// Lista de pedidos pendientes de entregar, respetando el orden que Joel
+// armó a mano (con las flechitas). Los que todavía no tienen un orden
+// asignado (recién tomados) van al final, ordenados por fecha.
+function pedidosBorradorOrdenados() {
+  return orders
+    .filter(o => o.borrador && !o.eliminado)
+    .sort((a, b) => {
+      const oa = a.ordenEntrega, ob = b.ordenEntrega;
+      if (oa != null && ob != null) return oa - ob;
+      if (oa != null) return -1;
+      if (ob != null) return 1;
+      return ordenarPorFechaAsc(a, b);
+    });
+}
+
+function moverPedidoBorrador(orderId, direccion) {
+  const lista = pedidosBorradorOrdenados();
+  // La primera vez que se mueve algo, les asignamos a todos un número de
+  // orden fijo según como estaban, para poder intercambiarlos entre sí.
+  lista.forEach((o, i) => { if (o.ordenEntrega == null) o.ordenEntrega = i; });
+
+  const idx = lista.findIndex(o => o.id === orderId);
+  const idxVecino = idx + direccion;
+  if (idx < 0 || idxVecino < 0 || idxVecino >= lista.length) return;
+
+  const a = lista[idx], b = lista[idxVecino];
+  const tmp = a.ordenEntrega;
+  a.ordenEntrega = b.ordenEntrega;
+  b.ordenEntrega = tmp;
+  a.actualizadoEn = Date.now();
+  b.actualizadoEn = Date.now();
+
+  guardarStorage();
+  renderVistaResumen();
+}
+
 function ordenarPorFechaAsc(a, b) {
   const pa = a.fecha.replace(/,.*/, '').split('/');
   const pb = b.fecha.replace(/,.*/, '').split('/');
@@ -3342,8 +3378,8 @@ function renderVistaResumen() {
   <div class="muted">Clientes</div>
   <strong>${clients.filter(c => !c.eliminado && (c.tipo || "Otro") !== "Otro").length}</strong>
 </div>
-        <div class="stat-box">
-          <div class="muted">Borradores</div>
+        <div class="stat-box" ${pedidosBorrador > 0 ? `onclick="document.getElementById('pedidosBorradorCard')?.scrollIntoView({behavior:'smooth', block:'start'})" style="cursor:pointer;"` : ""}>
+          <div class="muted">Borradores ${pedidosBorrador > 0 ? "↓" : ""}</div>
           <strong style="color:#92400e;">${pedidosBorrador}</strong>
         </div>
       </div>
@@ -3475,15 +3511,20 @@ function renderVistaResumen() {
     })()}
 
     ${pedidosBorrador > 0 ? `
-    <div class="form-card">
-      <h3 class="section-title">📋 Pedidos pendientes de entregar</h3>
-      ${orders.filter(o => o.borrador && !o.eliminado).map(o => `
+    <div class="form-card" id="pedidosBorradorCard" style="border-left:4px solid #92400e;">
+      <h3 class="section-title">📋 Pedidos pendientes de entregar (${pedidosBorrador})</h3>
+      <p class="muted" style="margin:0 0 10px;">Acomodalos con las flechitas en el orden que vas a repartir. Tocá "Entregar" a medida que los vas armando.</p>
+      ${pedidosBorradorOrdenados().map((o, i, lista) => `
         <div class="stock-row">
-          <div>
-            <div class="stock-nombre">${o.client.nombre}</div>
-            <div class="muted">${o.fecha}</div>
+          <div style="display:flex; flex-direction:column; gap:2px; margin-right:6px;">
+            <button class="btn-sm btn-outline" style="padding:2px 8px; ${i === 0 ? 'visibility:hidden;' : ''}" onclick="moverPedidoBorrador('${o.id}', -1)">▲</button>
+            <button class="btn-sm btn-outline" style="padding:2px 8px; ${i === lista.length - 1 ? 'visibility:hidden;' : ''}" onclick="moverPedidoBorrador('${o.id}', 1)">▼</button>
           </div>
-          <div style="text-align:right;">
+          <div>
+            <div class="stock-nombre">${i + 1}. ${o.client.nombre}</div>
+            <div class="muted">${o.fecha} · ${o.items.length} producto${o.items.length > 1 ? "s" : ""}</div>
+          </div>
+          <div style="text-align:right; margin-left:auto;">
             <div style="font-weight:600;">${formatCurrency(o.totals.totalSinIVA)}</div>
             <button class="btn-sm btn-confirmar" onclick="clienteActivoId='${o.client.id}'; confirmarEntrega('${o.id}'); setVista('resumen')">🚚 Entregar</button>
           </div>
