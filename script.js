@@ -483,7 +483,7 @@ function abrirModalCliente(id) {
 
   document.getElementById("modalClienteNombre").textContent = client.nombre;
   document.getElementById("modalClienteInfo").textContent =
-    [client.tipo || "Otro", client.horario ? "🕐 " + client.horario : "", Number(client.frecuencia) === 14 ? "📅 Quincenal" : "📅 Semanal", client.telefono, client.telefono2, client.direccion].filter(Boolean).join(" · ");
+    [client.tipo || "Otro", client.horario ? "🕐 " + client.horario : "", Number(client.frecuencia) === 14 ? "📅 Quincenal" : (Number(client.frecuencia) === 21 ? "📅 Cada 21 días" : "📅 Semanal"), client.telefono, client.telefono2, client.direccion].filter(Boolean).join(" · ");
 
   const btnTel2 = document.getElementById("btnModalTelefono2");
   if (btnTel2) btnTel2.style.display = client.telefono2 ? "flex" : "none";
@@ -1127,7 +1127,10 @@ function guardarPedido() {
 function editarPedido(id) {
   const order = orders.find(o => o.id === id);
   if (!order) return;
-  aplicarStock(order.items, +1);
+  // Si ya era un pedido confirmado, el stock estaba descontado de verdad y
+  // hay que devolverlo mientras se edita. Si todavía es borrador, nunca se
+  // tocó el stock, así que no hay nada que devolver.
+  if (!order.borrador) aplicarStock(order.items, +1);
   editingOrderId  = id;
   currentItems    = order.items.map(i => ({ ...i }));
   clienteActivoId = order.client.id;
@@ -1143,7 +1146,9 @@ function guardarCambiosPedido() {
   const idx = orders.findIndex(o => o.id === editingOrderId);
   if (idx === -1) return;
 
-  aplicarStock(currentItems, -1);
+  // Solo se toca el stock real si el pedido ya estaba confirmado. Si sigue
+  // en borrador, el stock real no se mueve — se sigue "reservando" nomás.
+  if (!orders[idx].borrador) aplicarStock(currentItems, -1);
   const tSin  = currentItems.reduce((a, i) => a + i.subtotalSinIVA, 0);
   const tCon  = currentItems.reduce((a, i) => a + i.subtotalConIVA, 0);
   const tCant = currentItems.reduce((a, i) => a + i.cantidad, 0);
@@ -1161,10 +1166,49 @@ function guardarCambiosPedido() {
   setVista("historial");
 }
 
+// Para pedidos en borrador: guarda los cambios que le hiciste (por si sumaste
+// o sacaste algo mientras armabas el reparto) Y lo confirma como entregado
+// en un solo paso — ahí sí se descuenta el stock real.
+function guardarYEntregarPedido() {
+  if (!editingOrderId) return;
+  const client = clients.find(c => c.id === clienteActivoId);
+  if (!client) return alert("No hay cliente seleccionado");
+  if (currentItems.length === 0) return alert("Agregá al menos un producto");
+
+  const idx = orders.findIndex(o => o.id === editingOrderId);
+  if (idx === -1) return;
+
+  for (const item of currentItems) {
+    const prod = catalog.find(p => p.id === item.productId);
+    if (prod && prod.stock < item.cantidad) {
+      if (!confirm(`Stock insuficiente para ${item.nombre}. Disponible: ${prod.stock}. ¿Confirmás igual?`)) return;
+    }
+  }
+
+  aplicarStock(currentItems, -1);
+  const tSin  = currentItems.reduce((a, i) => a + i.subtotalSinIVA, 0);
+  const tCon  = currentItems.reduce((a, i) => a + i.subtotalConIVA, 0);
+  const tCant = currentItems.reduce((a, i) => a + i.cantidad, 0);
+
+  orders[idx] = {
+    ...orders[idx], client, items: [...currentItems],
+    notas: document.getElementById("notasPedido").value.trim(),
+    modoPrecio: document.getElementById("modoPrecio").value,
+    totals: { totalSinIVA: tSin, totalConIVA: tCon, totalCantidad: tCant },
+    borrador: false
+  };
+
+  promoverPotencial(client.id);
+  guardarStorage();
+  currentItems   = [];
+  editingOrderId = null;
+  setVista("resumen");
+}
+
 function cancelarEdicionPedido() {
   if (editingOrderId) {
     const order = orders.find(o => o.id === editingOrderId);
-    if (order) aplicarStock(order.items, -1);
+    if (order && !order.borrador) aplicarStock(order.items, -1);
   }
   currentItems   = [];
   editingOrderId = null;
@@ -2752,8 +2796,9 @@ function renderVistaFormCliente() {
       <div class="form-group">
         <label>Frecuencia de visita</label>
         <select id="formClienteFrecuencia">
-          <option value="7" ${!c || Number(c.frecuencia) !== 14 ? "selected" : ""}>Semanal (cada 7 días)</option>
+          <option value="7" ${!c || (Number(c.frecuencia) !== 14 && Number(c.frecuencia) !== 21) ? "selected" : ""}>Semanal (cada 7 días)</option>
           <option value="14" ${c && Number(c.frecuencia) === 14 ? "selected" : ""}>Quincenal (cada 14 días)</option>
+          <option value="21" ${c && Number(c.frecuencia) === 21 ? "selected" : ""}>Cada 21 días</option>
         </select>
       </div>
       <div class="form-group">
@@ -2919,7 +2964,10 @@ function renderVistaPedido() {
       </div>
       <div class="actions-col">
         ${editingOrderId
-          ? `<button class="btn-success btn-full" onclick="guardarCambiosPedido()">💾 Guardar cambios</button>`
+          ? (orders.find(o => o.id === editingOrderId)?.borrador
+              ? `<button class="btn-success btn-full" onclick="guardarYEntregarPedido()">🚚 Confirmar entrega</button>
+                 <button class="btn-outline btn-full" onclick="guardarCambiosPedido()">💾 Guardar sin entregar</button>`
+              : `<button class="btn-success btn-full" onclick="guardarCambiosPedido()">💾 Guardar cambios</button>`)
           : `<button class="btn-success btn-full" onclick="guardarPedido()">💾 Guardar pedido</button>`
         }
         <button class="btn-whatsapp btn-full" onclick="enviarWhatsAppPedidoActual()">📱 Enviar por WhatsApp</button>
@@ -3513,20 +3561,20 @@ function renderVistaResumen() {
     ${pedidosBorrador > 0 ? `
     <div class="form-card" id="pedidosBorradorCard" style="border-left:4px solid #92400e;">
       <h3 class="section-title">📋 Pedidos pendientes de entregar (${pedidosBorrador})</h3>
-      <p class="muted" style="margin:0 0 10px;">Acomodalos con las flechitas en el orden que vas a repartir. Tocá "Entregar" a medida que los vas armando.</p>
+      <p class="muted" style="margin:0 0 10px;">Acomodalos con las flechitas en el orden que vas a repartir. Tocá el cliente para ver el pedido, armarlo y confirmar la entrega.</p>
       ${pedidosBorradorOrdenados().map((o, i, lista) => `
         <div class="stock-row">
           <div style="display:flex; flex-direction:column; gap:2px; margin-right:6px;">
             <button class="btn-sm btn-outline" style="padding:2px 8px; ${i === 0 ? 'visibility:hidden;' : ''}" onclick="moverPedidoBorrador('${o.id}', -1)">▲</button>
             <button class="btn-sm btn-outline" style="padding:2px 8px; ${i === lista.length - 1 ? 'visibility:hidden;' : ''}" onclick="moverPedidoBorrador('${o.id}', 1)">▼</button>
           </div>
-          <div>
+          <div style="cursor:pointer; flex:1;" onclick="editarPedido('${o.id}')">
             <div class="stock-nombre">${i + 1}. ${o.client.nombre}</div>
             <div class="muted">${o.fecha} · ${o.items.length} producto${o.items.length > 1 ? "s" : ""}</div>
           </div>
-          <div style="text-align:right; margin-left:auto;">
+          <div style="text-align:right; margin-left:auto; cursor:pointer;" onclick="editarPedido('${o.id}')">
             <div style="font-weight:600;">${formatCurrency(o.totals.totalSinIVA)}</div>
-            <button class="btn-sm btn-confirmar" onclick="clienteActivoId='${o.client.id}'; confirmarEntrega('${o.id}'); setVista('resumen')">🚚 Entregar</button>
+            <div class="muted" style="font-size:12px;">Ver / Armar ›</div>
           </div>
         </div>
       `).join("")}
