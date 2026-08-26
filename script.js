@@ -125,6 +125,12 @@ let editingOrderId    = null;
 let filtroCategoria   = "Todas";
 let tiposSeleccionados = new Set();
 let filtroDiaCliente = "Todos";
+let filtroZonaCliente = "Todas";
+
+function setFiltroZona(zona) {
+  filtroZonaCliente = zona;
+  renderVistaClientes();
+}
 let busquedaCliente = "";
 let vistaActual       = "clientes";  // clientes | form-cliente | pedido | historial | stock | backup
 let clienteActivoId   = null;
@@ -483,7 +489,7 @@ function abrirModalCliente(id) {
 
   document.getElementById("modalClienteNombre").textContent = client.nombre;
   document.getElementById("modalClienteInfo").textContent =
-    [client.tipo || "Otro", client.horario ? "🕐 " + client.horario : "", Number(client.frecuencia) === 14 ? "📅 Quincenal" : (Number(client.frecuencia) === 21 ? "📅 Cada 21 días" : "📅 Semanal"), client.telefono, client.telefono2, client.direccion].filter(Boolean).join(" · ");
+    [client.tipo || "Otro", client.zona ? "📍 " + client.zona : "", client.horario ? "🕐 " + client.horario : "", Number(client.frecuencia) === 14 ? "📅 Quincenal" : (Number(client.frecuencia) === 21 ? "📅 Cada 21 días" : "📅 Semanal"), client.telefono, client.telefono2, client.direccion].filter(Boolean).join(" · ");
 
   const btnTel2 = document.getElementById("btnModalTelefono2");
   if (btnTel2) btnTel2.style.display = client.telefono2 ? "flex" : "none";
@@ -594,6 +600,10 @@ function clientesFiltrados() {
     lista = lista.filter(c => (c.diaVisita || "Sin asignar") === filtroDiaCliente);
   }
 
+  if (filtroZonaCliente !== "Todas") {
+    lista = lista.filter(c => (c.zona || "Sin zona") === filtroZonaCliente);
+  }
+
   const q = busquedaCliente.trim().toLowerCase();
   if (q) {
     lista = lista.filter(c =>
@@ -685,6 +695,7 @@ function guardarCliente() {
   const nombre     = document.getElementById("formClienteNombre").value.trim();
   const tipo       = document.getElementById("formClienteTipo").value;
   const diaVisita  = document.getElementById("formClienteDia")?.value || "";
+  const zona       = document.getElementById("formClienteZona")?.value.trim() || "";
   const horario    = document.getElementById("formClienteHorario")?.value || "";
   const frecuencia = Number(document.getElementById("formClienteFrecuencia")?.value) || 7;
   const telefono   = document.getElementById("formClienteTelefono").value.trim();
@@ -726,9 +737,9 @@ function guardarCliente() {
 
   if (editandoClienteId) {
     const c = clients.find(c => c.id === editandoClienteId);
-    if (c) Object.assign(c, { nombre, tipo, diaVisita, horario, frecuencia, telefono, telefono2, email, direccion, potencial, seguimiento, lat, lng, ubicacionManual, actualizadoEn: Date.now() });
+    if (c) Object.assign(c, { nombre, tipo, diaVisita, zona, horario, frecuencia, telefono, telefono2, email, direccion, potencial, seguimiento, lat, lng, ubicacionManual, actualizadoEn: Date.now() });
   } else {
-    clients.unshift({ id: generarId(), nombre, tipo, diaVisita, horario, frecuencia, telefono, telefono2, email, direccion, notas: "", potencial, seguimiento, lat, lng, ubicacionManual, actualizadoEn: Date.now() });
+    clients.unshift({ id: generarId(), nombre, tipo, diaVisita, zona, horario, frecuencia, telefono, telefono2, email, direccion, notas: "", potencial, seguimiento, lat, lng, ubicacionManual, actualizadoEn: Date.now() });
   }
 
   guardarStorage();
@@ -2298,6 +2309,17 @@ function renderVistaClientes() {
       `).join("")}
     </div>
 
+    ${(() => {
+      const zonasUsadas = [...new Set(clients.filter(c => !c.eliminado).map(c => c.zona).filter(Boolean))].sort();
+      if (zonasUsadas.length === 0) return "";
+      return `
+      <div class="tipo-tabs">
+        ${["Todas", ...zonasUsadas, "Sin zona"].map(z => `
+          <button class="tipo-tab ${filtroZonaCliente === z ? "active" : ""}" onclick="setFiltroZona('${z}')">${z}</button>
+        `).join("")}
+      </div>`;
+    })()}
+
     <div class="client-list">
       ${lista.length === 0
         ? `<div class="empty-state">No hay clientes en esta categoría.<br>Tocá <strong>+ Nuevo</strong> para agregar uno.</div>`
@@ -2328,7 +2350,7 @@ const sinComprar = cuentaInactividad(c) && dias !== null && dias >= umbralInacti
                    ${sinComprar && !c.potencial ? ` <span class="badge-sin-comprar">⏰ ${dias}d</span>` : ''}
                     ${badgeSeguimiento}
                   </div>
-                  <div class="client-sub">${c.tipo || "Otro"}${c.horario ? " · 🕐 " + c.horario : ""}${c.telefono ? " · " + c.telefono : ""}${pedidosCliente > 0 ? " · " + pedidosCliente + " pedido" + (pedidosCliente > 1 ? "s" : "") : ""}${c.potencial ? " · Potencial" : ""}</div>
+                  <div class="client-sub">${c.tipo || "Otro"}${c.zona ? " · 📍 " + c.zona : ""}${c.horario ? " · 🕐 " + c.horario : ""}${c.telefono ? " · " + c.telefono : ""}${pedidosCliente > 0 ? " · " + pedidosCliente + " pedido" + (pedidosCliente > 1 ? "s" : "") : ""}${c.potencial ? " · Potencial" : ""}</div>
                 </div>
                 ${c.telefono ? `<button class="btn-recordatorio" onclick="event.stopPropagation(); abrirWhatsAppCliente('${c.id}')" title="Escribirle por WhatsApp">💬</button>` : ''}
                 <span class="client-arrow">›</span>
@@ -2778,6 +2800,13 @@ function renderVistaFormCliente() {
           <option value="">-- Elegí un tipo --</option>
           ${TIPOS_CLIENTE.map(t => `<option value="${t}" ${c && c.tipo === t ? "selected" : ""}>${t}</option>`).join("")}
         </select>
+      </div>
+      <div class="form-group">
+        <label>Zona</label>
+        <input id="formClienteZona" list="listaZonas" placeholder="Ej: Centro, Guadalupe..." value="${c ? c.zona || "" : ""}" />
+        <datalist id="listaZonas">
+          ${[...new Set(clients.map(x => x.zona).filter(Boolean))].sort().map(z => `<option value="${z}"></option>`).join("")}
+        </datalist>
       </div>
       <div class="form-group">
         <label>Día de visita</label>
