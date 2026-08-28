@@ -1909,6 +1909,22 @@ function toggleFormPrecio(id) {
   form.style.display = form.style.display === "none" ? "block" : "none";
 }
 
+// Para productos que vendés a comisión (por ejemplo le ganás 10% y el resto
+// es del proveedor): en vez de calcular el costo a mano, ponés tu % y esto
+// completa el campo de Costo solo, para que la ganancia del sistema termine
+// mostrando justo tu comisión.
+function calcularCostoPorComision(id) {
+  const precioInput = document.getElementById("input-precio-" + id);
+  const comisionInput = document.getElementById("input-comision-" + id);
+  const costoInput = document.getElementById("input-costo-" + id);
+  if (!precioInput || !comisionInput || !costoInput) return;
+  const precio = parseNumber(precioInput.value);
+  const comision = parseNumber(comisionInput.value);
+  if (!precio || comisionInput.value.trim() === "") return;
+  const costo = precio * (1 - comision / 100);
+  costoInput.value = Math.round(costo * 100) / 100;
+}
+
 function guardarPrecio(id) {
   const prod = catalog.find(p => p.id === id);
   if (!prod) return;
@@ -4246,8 +4262,12 @@ function renderVistaStock() {
                 </div>
               </div>
               <div class="form-group" style="margin:8px 0 0;">
-                <label>Costo (lo que pagás vos)</label>
+                <label>Costo (lo que pagás vos, o le corresponde al proveedor)</label>
                 <input id="input-costo-${p.id}" type="number" placeholder="Costo de compra" value="${costoActual || ""}" />
+              </div>
+              <div class="form-group" style="margin:8px 0 0;">
+                <label>¿O trabajás a comisión? Poné tu % y te calculo el costo solo</label>
+                <input id="input-comision-${p.id}" type="number" min="0" max="100" placeholder="Ej: 10 (tu comisión)" oninput="calcularCostoPorComision('${p.id}')" />
               </div>
               <button class="btn-success btn-full" style="margin-top:6px;" onclick="guardarPrecio('${p.id}')">Guardar</button>
             </div>
