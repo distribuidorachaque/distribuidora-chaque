@@ -1925,6 +1925,64 @@ function calcularCostoPorComision(id) {
   costoInput.value = Math.round(costo * 100) / 100;
 }
 
+function toggleFormNuevoProducto() {
+  const form = document.getElementById("form-nuevo-producto");
+  if (!form) return;
+  form.style.display = form.style.display === "none" ? "block" : "none";
+}
+
+function calcularCostoNuevoProductoPorComision() {
+  const precio = parseNumber(document.getElementById("nuevoProductoPrecio")?.value);
+  const comisionInput = document.getElementById("nuevoProductoComision");
+  const costoInput = document.getElementById("nuevoProductoCosto");
+  if (!precio || !comisionInput || !costoInput || comisionInput.value.trim() === "") return;
+  const comision = parseNumber(comisionInput.value);
+  costoInput.value = Math.round(precio * (1 - comision / 100) * 100) / 100;
+}
+
+function guardarNuevoProducto() {
+  const nombre = document.getElementById("nuevoProductoNombre").value.trim();
+  const categoria = document.getElementById("nuevoProductoCategoria").value.trim();
+  const precio = parseNumber(document.getElementById("nuevoProductoPrecio").value);
+  const codigo = document.getElementById("nuevoProductoCodigo").value.trim();
+  const costoVal = document.getElementById("nuevoProductoCosto").value;
+  const stock = parseInt(document.getElementById("nuevoProductoStock").value) || 0;
+
+  if (!nombre) return alert("Escribí el nombre del producto");
+  if (!categoria) return alert("Escribí la marca / categoría del producto");
+  if (!precio || precio <= 0) return alert("Ingresá un precio de venta válido");
+
+  const yaExiste = catalog.find(p => p.nombre.trim().toLowerCase() === nombre.toLowerCase());
+  if (yaExiste) {
+    if (!confirm(`Ya tenés cargado "${yaExiste.nombre}". ¿Igual querés crear otro producto con ese nombre?`)) return;
+  }
+
+  if (codigo) {
+    const repetido = catalog.find(p => codigoDeProducto(p) === codigo);
+    if (repetido) return alert(`El código ${codigo} ya lo tiene "${repetido.nombre}". Elegí otro.`);
+  }
+
+  const nuevo = {
+    id: generarId(), nombre, categoria, precioVentaSinIVA: precio, stock,
+    actualizadoEn: Date.now()
+  };
+  if (codigo) nuevo.codigo = codigo;
+  if (costoVal.trim() !== "") nuevo.costo = parseNumber(costoVal);
+
+  catalog.push(nuevo);
+  guardarStorage();
+
+  ["nuevoProductoNombre", "nuevoProductoCategoria", "nuevoProductoPrecio", "nuevoProductoCodigo", "nuevoProductoCosto", "nuevoProductoComision", "nuevoProductoStock"]
+    .forEach(id => { const el = document.getElementById(id); if (el) el.value = ""; });
+
+  const form = document.getElementById("form-nuevo-producto");
+  if (form) form.style.display = "none";
+
+  filtroStock = categoria;
+  renderVistaStock();
+  alert(`✅ "${nombre}" agregado a ${categoria}.`);
+}
+
 function guardarPrecio(id) {
   const prod = catalog.find(p => p.id === id);
   if (!prod) return;
@@ -4196,10 +4254,51 @@ function renderVistaStock() {
   cont.innerHTML = `
     <div class="page-header">
       <h2 class="page-title2">Stock</h2>
-      <div style="display:flex; gap:8px;">
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn-guardar-ahora" onclick="toggleFormNuevoProducto()">➕ Nuevo producto</button>
         <button class="btn-guardar-ahora" onclick="abrirListaPrecios()">📋 Lista precios</button>
         <button class="btn-guardar-ahora" onclick="abrirAvisoMarca()">📢 Avisar aumento</button>
       </div>
+    </div>
+
+    <div id="form-nuevo-producto" class="form-card" style="display:none;">
+      <h3 class="section-title">➕ Nuevo producto</h3>
+      <div class="form-group">
+        <label>Nombre</label>
+        <input id="nuevoProductoNombre" placeholder="Ej: Yerba Mate 1kg" />
+      </div>
+      <div class="form-group">
+        <label>Marca / categoría</label>
+        <input id="nuevoProductoCategoria" list="listaCategoriasProducto" placeholder="Ej: Yerbas, Alunexa..." />
+        <datalist id="listaCategoriasProducto">
+          ${categorias.map(c => `<option value="${c}"></option>`).join("")}
+        </datalist>
+      </div>
+      <div class="row-2">
+        <div class="form-group" style="margin:0;">
+          <label>Precio de venta (s/IVA)</label>
+          <input id="nuevoProductoPrecio" type="number" placeholder="Ej: 5000" />
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label>Código (opcional)</label>
+          <input id="nuevoProductoCodigo" type="number" placeholder="Ej: 400" />
+        </div>
+      </div>
+      <div class="row-2">
+        <div class="form-group" style="margin:0;">
+          <label>Costo (opcional)</label>
+          <input id="nuevoProductoCosto" type="number" placeholder="Costo de compra" oninput="document.getElementById('nuevoProductoComision').value=''" />
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label>o % Comisión</label>
+          <input id="nuevoProductoComision" type="number" min="0" max="100" placeholder="Ej: 10" oninput="calcularCostoNuevoProductoPorComision()" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Stock inicial</label>
+        <input id="nuevoProductoStock" type="number" min="0" placeholder="0" />
+      </div>
+      <button class="btn-primary btn-full" onclick="guardarNuevoProducto()">Guardar producto</button>
     </div>
 
     <div class="tipo-tabs">
