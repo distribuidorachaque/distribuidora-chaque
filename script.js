@@ -4254,10 +4254,10 @@ function renderVistaStock() {
   cont.innerHTML = `
     <div class="page-header">
       <h2 class="page-title2">Stock</h2>
-      <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <button class="btn-guardar-ahora" onclick="toggleFormNuevoProducto()">➕ Nuevo producto</button>
-        <button class="btn-guardar-ahora" onclick="abrirListaPrecios()">📋 Lista precios</button>
-        <button class="btn-guardar-ahora" onclick="abrirAvisoMarca()">📢 Avisar aumento</button>
+      <div style="display:flex; gap:4px;">
+        <button class="btn-guardar-ahora" style="padding:5px 8px; font-size:11px;" onclick="toggleFormNuevoProducto()">➕ Nuevo</button>
+        <button class="btn-guardar-ahora" style="padding:5px 8px; font-size:11px;" onclick="abrirListaPrecios()">📋 Precios</button>
+        <button class="btn-guardar-ahora" style="padding:5px 8px; font-size:11px;" onclick="abrirAvisoMarca()">📢 Aumento</button>
       </div>
     </div>
 
