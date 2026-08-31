@@ -1986,6 +1986,15 @@ function guardarNuevoProducto() {
 function guardarPrecio(id) {
   const prod = catalog.find(p => p.id === id);
   if (!prod) return;
+
+  const nombreInput = document.getElementById("input-nombre-" + id);
+  const nuevoNombre = nombreInput ? nombreInput.value.trim() : prod.nombre;
+  if (!nuevoNombre) return alert("El nombre no puede quedar vacío");
+
+  const categoriaInput = document.getElementById("input-categoria-" + id);
+  const nuevaCategoria = categoriaInput ? categoriaInput.value.trim() : prod.categoria;
+  if (!nuevaCategoria) return alert("La marca / categoría no puede quedar vacía");
+
   const nuevoPrecio = parseNumber(document.getElementById("input-precio-" + id).value);
   if (!nuevoPrecio || nuevoPrecio <= 0) return alert("Ingresá un precio de venta válido");
   const costoInput = document.getElementById("input-costo-" + id);
@@ -1999,11 +2008,20 @@ function guardarPrecio(id) {
     if (repetido) return alert(`El código ${nuevoCodigo} ya lo tiene "${repetido.nombre}". Elegí otro.`);
   }
 
+  const otroConMismoNombre = catalog.find(p => p.id !== id && p.nombre.trim().toLowerCase() === nuevoNombre.toLowerCase());
+  if (otroConMismoNombre) {
+    if (!confirm(`Ya tenés otro producto llamado "${otroConMismoNombre.nombre}". ¿Igual querés dejarlo así?`)) return;
+  }
+
+  const categoriaVieja = prod.categoria;
+  prod.nombre = nuevoNombre;
+  prod.categoria = nuevaCategoria;
   prod.precioVentaSinIVA = nuevoPrecio;
   if (costoInput && costoInput.value.trim() !== "") prod.costo = nuevoCosto;
   prod.codigo = nuevoCodigo;
   prod.actualizadoEn = Date.now();
   guardarStorage();
+  if (nuevaCategoria !== categoriaVieja) filtroStock = nuevaCategoria;
   renderVistaStock();
 }
 
@@ -4351,6 +4369,16 @@ function renderVistaStock() {
             <div class="muted">${p.categoria} · s/IVA: ${formatCurrency(p.precioVentaSinIVA)} · Costo: ${costoActual > 0 ? formatCurrency(costoActual) : "sin cargar ⚠️"}</div>
             <div id="form-precio-${p.id}" style="display:none; margin-top:8px;">
               <div class="row-2">
+                <div class="form-group" style="margin:0;">
+                  <label>Nombre</label>
+                  <input id="input-nombre-${p.id}" placeholder="Nombre del producto" value="${p.nombre}" />
+                </div>
+                <div class="form-group" style="margin:0;">
+                  <label>Marca / categoría</label>
+                  <input id="input-categoria-${p.id}" list="listaCategoriasProducto" placeholder="Marca" value="${p.categoria}" />
+                </div>
+              </div>
+              <div class="row-2" style="margin-top:8px;">
                 <div class="form-group" style="margin:0;">
                   <label>Código</label>
                   <input id="input-codigo-${p.id}" type="number" placeholder="Ej: 100" value="${codigoActual}" />
