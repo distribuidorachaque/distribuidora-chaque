@@ -3129,6 +3129,132 @@ function volverAlCliente() {
   if (clienteActivoId) abrirModalCliente(clienteActivoId);
 }
 
+function renderOrderCard(order) {
+  const saldo = calcularSaldo(order);
+  const totalPagado = (order.pagos || []).reduce((a, p) => a + p.monto, 0);
+  const formAbierto = ordenConFormPago === order.id;
+  return `
+  <div class="order-card ${order.pagado ? 'order-pagada' : 'order-pendiente'}">
+    <div class="order-top">
+      <div>
+        <div class="order-cliente">${order.client.nombre}</div>
+        <div class="muted order-fecha">${order.fecha}</div>
+      </div>
+      <div style="text-align:right;">
+        <div class="order-total-label">${formatCurrency(order.totals.totalSinIVA)}</div>
+        <div class="muted" style="font-size:11px;">total s/IVA</div>
+        ${order.borrador
+          ? `<span class="badge-estado badge-borrador">📋 Borrador</span>`
+          : `<span class="badge-estado ${order.pagado ? 'badge-pagado' : 'badge-pendiente'}">${order.pagado ? '✅ Pagado' : '🔴 Pendiente'}</span>`
+        }
+      </div>
+    </div>
+
+    ${!order.pagado ? `
+      <div class="saldo-row">
+        ${totalPagado > 0 ? `<span class="saldo-pagado">Pagado: ${formatCurrency(totalPagado)}</span>` : ''}
+        <span class="saldo-debe">Saldo: ${formatCurrency(saldo)}</span>
+      </div>` : ''}
+
+    ${(order.pagos || []).length > 0 ? `
+      <div class="pagos-lista">
+        ${order.pagos.map(p => `
+          <div class="pago-item">${p.medio === "Transferencia" ? "🏦" : "💵"} ${formatCurrency(p.monto)} <span class="muted">· ${p.medio || "Efectivo"} · ${p.fecha}</span></div>
+        `).join('')}
+      </div>` : ''}
+
+    <div class="order-items">
+      ${order.items.map(i => `<span class="order-item-tag">${i.cantidad}× ${i.nombre}</span>`).join("")}
+    </div>
+    ${order.notas ? `<div class="order-nota">📝 ${order.notas}</div>` : ""}
+
+    ${formAbierto ? `
+      <div class="form-pago">
+        <div class="row-2" style="margin-bottom:8px;">
+          <input id="inputMontoPago-${order.id}" type="number" placeholder="Monto recibido" />
+          <button class="btn-ubicacion" onclick="completarPagoTotal('${order.id}')">💯 Total (${formatCurrency(calcularSaldo(order))})</button>
+        </div>
+        <div class="medio-pago-tabs" style="margin-bottom:8px;">
+          <button type="button" class="medio-pago-tab active" id="medioEfectivo-${order.id}" onclick="elegirMedioPago('${order.id}', 'Efectivo')">💵 Efectivo</button>
+          <button type="button" class="medio-pago-tab" id="medioTransferencia-${order.id}" onclick="elegirMedioPago('${order.id}', 'Transferencia')">🏦 Transferencia</button>
+          <input type="hidden" id="medioPago-${order.id}" value="Efectivo" />
+        </div>
+        <div class="row-2">
+          <button class="btn-success" onclick="confirmarPago('${order.id}')">✅ Confirmar pago</button>
+          <button class="btn-gray" onclick="abrirFormPago('${order.id}')">Cancelar</button>
+        </div>
+      </div>` : ''}
+
+    <div class="order-actions">
+      ${order.borrador ? `
+        <button class="btn-sm btn-confirmar" onclick="confirmarEntrega('${order.id}')">🚚 Confirmar entrega</button>
+      ` : `
+        ${!order.pagado ? `<button class="btn-sm btn-pago" onclick="abrirFormPago('${order.id}')">💵 Registrar pago</button>` : ''}
+        ${order.pagado || (order.pagos || []).length > 0 ? `<button class="btn-sm btn-pago-deshacer" onclick="resetearPagos('${order.id}')">↩ Resetear</button>` : ''}
+        ${(order.pagos || []).length > 0 ? `<button class="btn-sm btn-outline" onclick="enviarConfirmacionPago('${order.id}')">💬 Avisar pago</button>` : ''}
+      `}
+      <button class="btn-sm btn-outline" onclick="editarPedido('${order.id}')">✏️ Editar</button>
+      <button class="btn-sm btn-outline" onclick="enviarWhatsAppPedidoGuardado('${order.id}')">📱 WA</button>
+      <button class="btn-sm btn-outline" onclick="generarPDFPedidoGuardado('${order.id}')">📄 PDF</button>
+      <button class="btn-sm btn-outline" onclick="imprimirRemito('${order.id}')">🖨️ Remito</button>
+      <button class="btn-sm btn-danger" onclick="eliminarPedido('${order.id}')">🗑️</button>
+    </div>
+  </div>`;
+}
+
+const NOMBRES_MES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+
+function ordenarPorFechaDesc(a, b) {
+  return ordenarPorFechaAsc(b, a);
+}
+
+// Arma el historial de un cliente agrupado por año y mes, plegado como
+// acordeón — así no hay que scrollear kilómetros para llegar a lo viejo,
+// y de paso queda armado para comparar un mismo mes entre años distintos.
+function renderHistorialAgrupado(lista) {
+  const ordenada = [...lista].sort(ordenarPorFechaDesc);
+  const porAnio = {};
+  ordenada.forEach(o => {
+    const partes = o.fecha.replace(/,.*/, "").split("/");
+    const anio = partes[2], mes = parseInt(partes[1]);
+    if (!porAnio[anio]) porAnio[anio] = {};
+    if (!porAnio[anio][mes]) porAnio[anio][mes] = [];
+    porAnio[anio][mes].push(o);
+  });
+
+  const anios = Object.keys(porAnio).sort((a, b) => b - a);
+
+  return anios.map((anio, idxAnio) => {
+    const meses = Object.keys(porAnio[anio]).map(Number).sort((a, b) => b - a);
+    const totalAnio = meses.reduce((acc, m) => acc + porAnio[anio][m].reduce((a, o) => a + o.totals.totalSinIVA, 0), 0);
+    const cantAnio = meses.reduce((acc, m) => acc + porAnio[anio][m].length, 0);
+
+    return `
+    <details ${idxAnio === 0 ? "open" : ""} style="margin-bottom:10px; background:#fff; border-radius:12px; overflow:hidden; border:1px solid #e5e7eb;">
+      <summary style="padding:14px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; list-style:none; font-size:16px;">
+        <strong>📅 ${anio}</strong>
+        <span class="muted" style="font-size:13px;">${cantAnio} pedido${cantAnio > 1 ? "s" : ""} · ${formatCurrency(totalAnio)}</span>
+      </summary>
+      <div style="padding:0 10px 10px;">
+        ${meses.map((mes, idxMes) => {
+          const pedidosMes = porAnio[anio][mes];
+          const totalMes = pedidosMes.reduce((a, o) => a + o.totals.totalSinIVA, 0);
+          return `
+          <details ${idxAnio === 0 && idxMes === 0 ? "open" : ""} style="margin-bottom:8px; background:#f8fafc; border-radius:10px; overflow:hidden;">
+            <summary style="padding:10px 12px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; list-style:none; font-weight:600; font-size:14px;">
+              <span>${NOMBRES_MES[mes - 1]}</span>
+              <span class="muted" style="font-size:12px; font-weight:400;">${pedidosMes.length} pedido${pedidosMes.length > 1 ? "s" : ""} · ${formatCurrency(totalMes)}</span>
+            </summary>
+            <div style="padding:0 8px 8px;">
+              ${pedidosMes.map(renderOrderCard).join("")}
+            </div>
+          </details>`;
+        }).join("")}
+      </div>
+    </details>`;
+  }).join("");
+}
+
 function renderVistaHistorial() {
   const cont   = document.getElementById("vista-contenido");
   if (!cont) return;
@@ -3146,78 +3272,8 @@ function renderVistaHistorial() {
 
     ${lista.length === 0
       ? `<div class="empty-state">No hay pedidos ${client ? "para este cliente" : "guardados"} aún.</div>`
-      : lista.map(order => {
-          const saldo = calcularSaldo(order);
-          const totalPagado = (order.pagos || []).reduce((a, p) => a + p.monto, 0);
-          const formAbierto = ordenConFormPago === order.id;
-          return `
-          <div class="order-card ${order.pagado ? 'order-pagada' : 'order-pendiente'}">
-            <div class="order-top">
-              <div>
-                <div class="order-cliente">${order.client.nombre}</div>
-                <div class="muted order-fecha">${order.fecha}</div>
-              </div>
-              <div style="text-align:right;">
-                <div class="order-total-label">${formatCurrency(order.totals.totalSinIVA)}</div>
-                <div class="muted" style="font-size:11px;">total s/IVA</div>
-                ${order.borrador
-                  ? `<span class="badge-estado badge-borrador">📋 Borrador</span>`
-                  : `<span class="badge-estado ${order.pagado ? 'badge-pagado' : 'badge-pendiente'}">${order.pagado ? '✅ Pagado' : '🔴 Pendiente'}</span>`
-                }
-              </div>
-            </div>
-
-            ${!order.pagado ? `
-              <div class="saldo-row">
-                ${totalPagado > 0 ? `<span class="saldo-pagado">Pagado: ${formatCurrency(totalPagado)}</span>` : ''}
-                <span class="saldo-debe">Saldo: ${formatCurrency(saldo)}</span>
-              </div>` : ''}
-
-            ${(order.pagos || []).length > 0 ? `
-              <div class="pagos-lista">
-                ${order.pagos.map(p => `
-                  <div class="pago-item">${p.medio === "Transferencia" ? "🏦" : "💵"} ${formatCurrency(p.monto)} <span class="muted">· ${p.medio || "Efectivo"} · ${p.fecha}</span></div>
-                `).join('')}
-              </div>` : ''}
-
-            <div class="order-items">
-              ${order.items.map(i => `<span class="order-item-tag">${i.cantidad}× ${i.nombre}</span>`).join("")}
-            </div>
-            ${order.notas ? `<div class="order-nota">📝 ${order.notas}</div>` : ""}
-
-            ${formAbierto ? `
-              <div class="form-pago">
-                <div class="row-2" style="margin-bottom:8px;">
-                  <input id="inputMontoPago-${order.id}" type="number" placeholder="Monto recibido" />
-                  <button class="btn-ubicacion" onclick="completarPagoTotal('${order.id}')">💯 Total (${formatCurrency(calcularSaldo(order))})</button>
-                </div>
-                <div class="medio-pago-tabs" style="margin-bottom:8px;">
-                  <button type="button" class="medio-pago-tab active" id="medioEfectivo-${order.id}" onclick="elegirMedioPago('${order.id}', 'Efectivo')">💵 Efectivo</button>
-                  <button type="button" class="medio-pago-tab" id="medioTransferencia-${order.id}" onclick="elegirMedioPago('${order.id}', 'Transferencia')">🏦 Transferencia</button>
-                  <input type="hidden" id="medioPago-${order.id}" value="Efectivo" />
-                </div>
-                <div class="row-2">
-                  <button class="btn-success" onclick="confirmarPago('${order.id}')">✅ Confirmar pago</button>
-                  <button class="btn-gray" onclick="abrirFormPago('${order.id}')">Cancelar</button>
-                </div>
-              </div>` : ''}
-
-            <div class="order-actions">
-              ${order.borrador ? `
-                <button class="btn-sm btn-confirmar" onclick="confirmarEntrega('${order.id}')">🚚 Confirmar entrega</button>
-              ` : `
-                ${!order.pagado ? `<button class="btn-sm btn-pago" onclick="abrirFormPago('${order.id}')">💵 Registrar pago</button>` : ''}
-                ${order.pagado || (order.pagos || []).length > 0 ? `<button class="btn-sm btn-pago-deshacer" onclick="resetearPagos('${order.id}')">↩ Resetear</button>` : ''}
-                ${(order.pagos || []).length > 0 ? `<button class="btn-sm btn-outline" onclick="enviarConfirmacionPago('${order.id}')">💬 Avisar pago</button>` : ''}
-              `}
-              <button class="btn-sm btn-outline" onclick="editarPedido('${order.id}')">✏️ Editar</button>
-              <button class="btn-sm btn-outline" onclick="enviarWhatsAppPedidoGuardado('${order.id}')">📱 WA</button>
-              <button class="btn-sm btn-outline" onclick="generarPDFPedidoGuardado('${order.id}')">📄 PDF</button>
-              <button class="btn-sm btn-outline" onclick="imprimirRemito('${order.id}')">🖨️ Remito</button>
-              <button class="btn-sm btn-danger" onclick="eliminarPedido('${order.id}')">🗑️</button>
-            </div>
-          </div>`;
-        }).join("")}
+      : (client ? renderHistorialAgrupado(lista) : lista.map(renderOrderCard).join(""))
+    }
   `;
 }
 
