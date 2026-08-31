@@ -749,13 +749,13 @@ function guardarCliente() {
 
 // ── Catálogo ──────────────────────────────────────────────────────────────────
 function obtenerCategorias() {
-  const cats = [...new Set(catalog.map(p => p.categoria || "Sin categoría"))];
+  const cats = [...new Set(catalogActivo().map(p => p.categoria || "Sin categoría"))];
   return ["Todas", ...cats.sort((a, b) => a.localeCompare(b))];
 }
 
 function obtenerCatalogoFiltrado() {
-  if (filtroCategoria === "Todas") return catalog;
-  return catalog.filter(p => (p.categoria || "Sin categoría") === filtroCategoria);
+  if (filtroCategoria === "Todas") return catalogActivo();
+  return catalogActivo().filter(p => (p.categoria || "Sin categoría") === filtroCategoria);
 }
 
 function renderSelectProductos() {
@@ -845,6 +845,14 @@ const CODIGOS_SUGERIDOS_NORM = Object.fromEntries(
   Object.entries(CODIGOS_SUGERIDOS).map(([nombre, cod]) => [normalizarNombreProducto(nombre), cod])
 );
 
+// Catálogo "activo": lo que se puede seguir vendiendo. Los productos
+// eliminados no se borran de verdad — se ocultan de las listas, pero los
+// pedidos viejos que ya los tenían cargados siguen mostrando todo bien,
+// porque cada pedido guarda una foto de los datos al momento de la venta.
+function catalogActivo() {
+  return catalog.filter(p => !p.eliminado);
+}
+
 function codigoDeProducto(p) {
   if (p.codigo) return String(p.codigo);
   if (CODIGOS_SUGERIDOS[p.nombre]) return CODIGOS_SUGERIDOS[p.nombre];
@@ -866,7 +874,7 @@ function buscarPorCodigo() {
   const val = document.getElementById("codigoProducto").value.trim();
   if (!val) { info.innerHTML = ""; return; }
 
-  const exacto = catalog.filter(p => codigoDeProducto(p) && codigoDeProducto(p) === val);
+  const exacto = catalogActivo().filter(p => codigoDeProducto(p) && codigoDeProducto(p) === val);
   if (exacto.length === 1) {
     seleccionarProductoPorCodigo(exacto[0]);
     mostrarProductoConfirmado(exacto[0]);
@@ -875,7 +883,7 @@ function buscarPorCodigo() {
     return;
   }
 
-  const parciales = catalog.filter(p => codigoDeProducto(p) && codigoDeProducto(p).startsWith(val));
+  const parciales = catalogActivo().filter(p => codigoDeProducto(p) && codigoDeProducto(p).startsWith(val));
   if (parciales.length > 0) {
     info.innerHTML = `
       <div style="border:1px solid #e5e7eb; border-radius:10px; overflow-y:auto; max-height:260px;">
@@ -929,7 +937,7 @@ function elegirCodigoDeLaLista(prodId) {
 function confirmarCodigoConEnter() {
   const val = document.getElementById("codigoProducto")?.value.trim();
   if (!val) return;
-  const parciales = catalog.filter(p => codigoDeProducto(p) && codigoDeProducto(p).startsWith(val));
+  const parciales = catalogActivo().filter(p => codigoDeProducto(p) && codigoDeProducto(p).startsWith(val));
   if (parciales.length === 1) {
     elegirCodigoDeLaLista(parciales[0].id);
   } else {
@@ -1952,13 +1960,13 @@ function guardarNuevoProducto() {
   if (!categoria) return alert("Escribí la marca / categoría del producto");
   if (!precio || precio <= 0) return alert("Ingresá un precio de venta válido");
 
-  const yaExiste = catalog.find(p => p.nombre.trim().toLowerCase() === nombre.toLowerCase());
+  const yaExiste = catalogActivo().find(p => p.nombre.trim().toLowerCase() === nombre.toLowerCase());
   if (yaExiste) {
     if (!confirm(`Ya tenés cargado "${yaExiste.nombre}". ¿Igual querés crear otro producto con ese nombre?`)) return;
   }
 
   if (codigo) {
-    const repetido = catalog.find(p => codigoDeProducto(p) === codigo);
+    const repetido = catalogActivo().find(p => codigoDeProducto(p) === codigo);
     if (repetido) return alert(`El código ${codigo} ya lo tiene "${repetido.nombre}". Elegí otro.`);
   }
 
@@ -2004,11 +2012,11 @@ function guardarPrecio(id) {
   const codigoInput = document.getElementById("input-codigo-" + id);
   const nuevoCodigo = codigoInput && codigoInput.value.trim() !== "" ? codigoInput.value.trim() : "";
   if (nuevoCodigo) {
-    const repetido = catalog.find(p => p.id !== id && codigoDeProducto(p) === nuevoCodigo);
+    const repetido = catalogActivo().find(p => p.id !== id && codigoDeProducto(p) === nuevoCodigo);
     if (repetido) return alert(`El código ${nuevoCodigo} ya lo tiene "${repetido.nombre}". Elegí otro.`);
   }
 
-  const otroConMismoNombre = catalog.find(p => p.id !== id && p.nombre.trim().toLowerCase() === nuevoNombre.toLowerCase());
+  const otroConMismoNombre = catalogActivo().find(p => p.id !== id && p.nombre.trim().toLowerCase() === nuevoNombre.toLowerCase());
   if (otroConMismoNombre) {
     if (!confirm(`Ya tenés otro producto llamado "${otroConMismoNombre.nombre}". ¿Igual querés dejarlo así?`)) return;
   }
@@ -2022,6 +2030,19 @@ function guardarPrecio(id) {
   prod.actualizadoEn = Date.now();
   guardarStorage();
   if (nuevaCategoria !== categoriaVieja) filtroStock = nuevaCategoria;
+  renderVistaStock();
+}
+
+// Borrado "suave": el producto desaparece de Stock, de los pedidos nuevos y
+// de los códigos, pero los pedidos VIEJOS que ya lo tenían cargado siguen
+// mostrando todo bien (cada pedido guarda una foto de los datos de venta).
+function eliminarProducto(id) {
+  const prod = catalog.find(p => p.id === id);
+  if (!prod) return;
+  if (!confirm(`¿Eliminar "${prod.nombre}"? No vas a poder cargarlo en pedidos nuevos, pero tus ventas viejas de este producto quedan intactas en el historial.`)) return;
+  prod.eliminado = true;
+  prod.actualizadoEn = Date.now();
+  guardarStorage();
   renderVistaStock();
 }
 
@@ -2217,7 +2238,7 @@ function contarClientesInactivos() {
 
 // Cuenta productos agotados o con stock bajo, para la alertita en la barra de abajo
 function contarStockBajo() {
-  return catalog.filter(p => p.stock <= STOCK_BAJO_UMBRAL).length;
+  return catalogActivo().filter(p => p.stock <= STOCK_BAJO_UMBRAL).length;
 }
 
 function diasSinComprar(clienteId) {
@@ -3668,8 +3689,8 @@ function renderVistaResumen() {
     })()}
 
     ${(() => {
-      const bajos = catalog.filter(p => p.stock > 0 && p.stock <= STOCK_BAJO_UMBRAL);
-      const agotados = catalog.filter(p => p.stock === 0);
+      const bajos = catalogActivo().filter(p => p.stock > 0 && p.stock <= STOCK_BAJO_UMBRAL);
+      const agotados = catalogActivo().filter(p => p.stock === 0);
       if (bajos.length === 0 && agotados.length === 0) return "";
       return `
       <div class="form-card">
@@ -3979,7 +4000,7 @@ function renderVistaAvisoMarca() {
   const cont = document.getElementById("vista-contenido");
   if (!cont) return;
 
-  const marcasDisponibles = [...new Set(catalog.map(p => p.categoria))].sort();
+  const marcasDisponibles = [...new Set(catalogActivo().map(p => p.categoria))].sort();
 
   if (!marcaAvisoSeleccionada) {
     cont.innerHTML = `
@@ -4055,8 +4076,8 @@ function renderVistaListaPrecios() {
   const cont = document.getElementById("vista-contenido");
   if (!cont) return;
 
-  const marcasDisponibles = [...new Set(catalog.map(p => p.categoria))].sort();
-  const productosSeleccionados = catalog.filter(p => marcasListaPrecios.has(p.categoria));
+  const marcasDisponibles = [...new Set(catalogActivo().map(p => p.categoria))].sort();
+  const productosSeleccionados = catalogActivo().filter(p => marcasListaPrecios.has(p.categoria));
 
   cont.innerHTML = `
     <div class="page-header">
@@ -4083,7 +4104,7 @@ function renderVistaListaPrecios() {
         : marcasDisponibles.filter(m => marcasListaPrecios.has(m)).map(m => `
           <div class="lista-precio-marca">
             <div class="lista-precio-marca-titulo">${m}</div>
-            ${catalog.filter(p => p.categoria === m).map(p => `
+            ${catalogActivo().filter(p => p.categoria === m).map(p => `
               <div class="lista-precio-item">
                 <span>${p.nombre}${precioPorUnidadTexto(p)}</span>
                 <strong>${formatCurrency(p.precioVentaSinIVA)}</strong>
@@ -4103,11 +4124,11 @@ function renderVistaListaPrecios() {
 }
 
 function construirMensajeListaPrecios() {
-  const marcasDisponibles = [...new Set(catalog.map(p => p.categoria))].sort();
+  const marcasDisponibles = [...new Set(catalogActivo().map(p => p.categoria))].sort();
   let msg = `📋 *Lista de precios*\n\n`;
   marcasDisponibles.filter(m => marcasListaPrecios.has(m)).forEach(m => {
     msg += `*${m}*\n`;
-    catalog.filter(p => p.categoria === m).forEach(p => {
+    catalogActivo().filter(p => p.categoria === m).forEach(p => {
       const xUnidad = BLISTER_12.includes(p.nombre) && p.categoria === "Vita"
         ? ` (${formatCurrency(p.precioVentaSinIVA / 12)} c/u)` : "";
       msg += `▪️ ${p.nombre}: ${formatCurrency(p.precioVentaSinIVA)}${xUnidad}\n`;
@@ -4141,14 +4162,14 @@ async function generarPDFListaPrecios() {
   doc.text(new Date().toLocaleDateString("es-AR"), margin, y);
   y += 10;
 
-  const marcasDisponibles = [...new Set(catalog.map(p => p.categoria))].sort();
+  const marcasDisponibles = [...new Set(catalogActivo().map(p => p.categoria))].sort();
   marcasDisponibles.filter(m => marcasListaPrecios.has(m)).forEach(m => {
     if (y > 260) { doc.addPage(); y = 20; }
     doc.setFont("helvetica", "bold"); doc.setFontSize(13);
     doc.text(m, margin, y);
     y += 7;
 
-    const filas = catalog.filter(p => p.categoria === m).map(p => {
+    const filas = catalogActivo().filter(p => p.categoria === m).map(p => {
       const nombreConUnidad = BLISTER_12.includes(p.nombre) && p.categoria === "Vita"
         ? `${p.nombre} (${formatCurrency(p.precioVentaSinIVA / 12)} c/u)` : p.nombre;
       return [nombreConUnidad, formatCurrency(p.precioVentaSinIVA)];
@@ -4266,8 +4287,8 @@ function renderVistaStock() {
   const cont = document.getElementById("vista-contenido");
   if (!cont) return;
 
-  const categorias = [...new Set(catalog.map(p => p.categoria))].sort();
-  const catalogFiltrado = filtroStock === "Todas" ? catalog : catalog.filter(p => p.categoria === filtroStock);
+  const categorias = [...new Set(catalogActivo().map(p => p.categoria))].sort();
+  const catalogFiltrado = filtroStock === "Todas" ? catalogActivo() : catalogActivo().filter(p => p.categoria === filtroStock);
 
   cont.innerHTML = `
     <div class="page-header">
@@ -4287,7 +4308,7 @@ function renderVistaStock() {
       </div>
       <div class="form-group">
         <label>Marca / categoría</label>
-        <input id="nuevoProductoCategoria" list="listaCategoriasProducto" placeholder="Ej: Yerbas, Alunexa..." />
+        <input id="nuevoProductoCategoria" list="listaCategoriasProducto" placeholder="Ej: Yerbas, Alunexa..." value="${filtroStock !== "Todas" ? filtroStock : ""}" />
         <datalist id="listaCategoriasProducto">
           ${categorias.map(c => `<option value="${c}"></option>`).join("")}
         </datalist>
@@ -4396,7 +4417,10 @@ function renderVistaStock() {
                 <label>¿O trabajás a comisión? Poné tu % y te calculo el costo solo</label>
                 <input id="input-comision-${p.id}" type="number" min="0" max="100" placeholder="Ej: 10 (tu comisión)" oninput="calcularCostoPorComision('${p.id}')" />
               </div>
-              <button class="btn-success btn-full" style="margin-top:6px;" onclick="guardarPrecio('${p.id}')">Guardar</button>
+              <div class="row-2" style="margin-top:6px;">
+                <button class="btn-success" onclick="guardarPrecio('${p.id}')">Guardar</button>
+                <button class="btn-outline" style="color:#dc2626;" onclick="eliminarProducto('${p.id}')">🗑️ Eliminar</button>
+              </div>
             </div>
           </div>
           <div style="display:flex; align-items:center; gap:8px;">
@@ -4711,10 +4735,10 @@ function _crearExcelModelo() {
   });
 
   const wb = XLSX.utils.book_new();
-  const marcas = ["Alunexa", "Fungimania", "Vita"];
+  const marcas = [...new Set(catalogActivo().map(p => p.categoria))].sort();
 
   marcas.forEach(marca => {
-    const productos = catalog.filter(p => p.categoria === marca);
+    const productos = catalogActivo().filter(p => p.categoria === marca);
     if (productos.length === 0) return;
 
     const dataRow = 7;
