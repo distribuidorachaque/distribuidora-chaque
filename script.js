@@ -1511,7 +1511,7 @@ async function generarCierreMes() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `Cierre_${String(mesActual).padStart(2,"0")}-${anioActual}_Alunexa.xlsx`;
+  a.download = `Cierre_del_mes_Distribuidora_Chaque_${String(mesActual).padStart(2,"0")}-${anioActual}.xlsx`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -2077,7 +2077,7 @@ function exportarDatos() {
   const blob = new Blob([JSON.stringify({ fecha: new Date().toISOString(), clients, catalog, orders }, null, 2)], { type: "application/json" });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement("a");
-  a.href = url; a.download = "backup-pedidos-alunexa.json"; a.click();
+  a.href = url; a.download = "backup-pedidos-distribuidora-chaque.json"; a.click();
   URL.revokeObjectURL(url);
 }
 
@@ -4888,7 +4888,7 @@ function generarExcel(fecha) {
   XLSX.utils.book_append_sheet(wb, ws2, "Detalle ventas");
 
   const [d,m,y] = fecha.split("/");
-  XLSX.writeFile(wb, `Ventas_${d}-${m}-${y}_Alunexa.xlsx`);
+  XLSX.writeFile(wb, `Ventas_${d}-${m}-${y}_Distribuidora_Chaque.xlsx`);
 }
 
 // ── Indicador online/offline ──────────────────────────────────────────────
