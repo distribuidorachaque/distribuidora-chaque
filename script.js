@@ -4632,20 +4632,21 @@ async function generarFacturaPDF(order, modo) {
 
   // Título arriba derecha
   doc.setFont("helvetica", "bold"); doc.setFontSize(18);
-  doc.text("Comprobante de Venta", pageW - margin, y - 2, { align: "right" });
+  doc.text("Remito", pageW - margin, y - 2, { align: "right" });
 
   // Datos de contacto debajo del logo
   y += 20;
   doc.setFont("helvetica", "normal"); doc.setFontSize(9);
   doc.text("Santa Fe, Argentina", margin, y); y += 4;
-  doc.text("Tel: 342-5040728", margin, y); y += 6;
+  doc.text("Tel: 342-5040728", margin, y); y += 4;
+  doc.text("distribuidorachaque@gmail.com", margin, y); y += 6;
 
   doc.setDrawColor(180, 180, 180);
   doc.line(margin, y, pageW - margin, y); y += 6;
 
   const nro = order.nroFactura || obtenerNroFactura();
   doc.setFont("helvetica", "bold"); doc.setFontSize(10);
-  doc.text(`Número de Factura: ${nro}`, margin, y); y += 5;
+  doc.text(`Número de Remito: ${nro}`, margin, y); y += 5;
   doc.setFont("helvetica", "normal");
   doc.text(`Fecha: ${order.fecha || new Date().toLocaleString("es-AR")}`, margin, y); y += 5;
   doc.text(`Cliente: ${order.client.nombre}`, margin, y); y += 5;
@@ -4690,6 +4691,11 @@ async function generarFacturaPDF(order, modo) {
     doc.text(`Total a Pagar: ${formatCurrency(order.totals.totalConIVA)}`, rightX, y, { align: "right" }); y += 5;
   }
 
+  y += 4;
+  doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(120, 120, 120);
+  doc.text("Comprobante no válido como factura", rightX, y, { align: "right" }); y += 2;
+  doc.setTextColor(0, 0, 0);
+
   if (order.notas) { y += 3; doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text(`Notas: ${order.notas}`, margin, y); y += 6; }
 
   y += 12;
@@ -4699,7 +4705,7 @@ async function generarFacturaPDF(order, modo) {
   doc.text("Para más información, visite nuestro sitio web o síganos en nuestras redes sociales", pageW / 2, pageH - 14, { align: "center" });
   doc.text("Distribuidora Chaque · Santa Fe, Argentina", pageW / 2, pageH - 9, { align: "center" });
 
-  doc.save(`Factura_${nro}_${order.client.nombre.replace(/\s+/g, "_")}.pdf`);
+  doc.save(`Remito_${nro}_${order.client.nombre.replace(/\s+/g, "_")}.pdf`);
 }
 
 async function generarPDFPedidoActual() {
