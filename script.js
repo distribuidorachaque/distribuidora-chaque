@@ -482,6 +482,43 @@ function setVista(vista, clienteId) {
 }
 
 // ── Modal cliente ────────────────────────────────────────────────────────────
+// ── Ver todos los datos del cliente, en solo lectura (sin entrar a editar) ──
+function verDatosCliente() {
+  const c = clients.find(x => x.id === clienteActivoId);
+  if (!c) return;
+
+  document.getElementById("verClienteNombre").textContent = c.nombre;
+
+  const frecuenciaTxto = Number(c.frecuencia) === 14 ? "Quincenal (cada 14 días)" : (Number(c.frecuencia) === 21 ? "Cada 21 días" : "Semanal (cada 7 días)");
+  const filas = [
+    ["Tipo", c.tipo || "Otro"],
+    ["Zona", c.zona || "—"],
+    ["Día de visita", c.diaVisita || "Sin asignar"],
+    ["Horario", c.horario || "—"],
+    ["Frecuencia", frecuenciaTxto],
+    ["Teléfono", c.telefono || "—"],
+    ["Teléfono 2", c.telefono2 || "—"],
+    ["Email", c.email || "—"],
+    ["Dirección", c.direccion || "—"],
+    ["Notas", c.notas || "—"],
+    ["Potencial", c.potencial ? "Sí 🌱" : "No"],
+  ];
+
+  document.getElementById("verClienteDatos").innerHTML = filas.map(([label, valor]) => `
+    <div style="display:flex; justify-content:space-between; gap:12px; padding:9px 0; border-bottom:1px solid #f0f0f0;">
+      <span class="muted">${label}</span>
+      <strong style="text-align:right;">${valor}</strong>
+    </div>
+  `).join("");
+
+  document.getElementById("modalVerCliente").style.display = "flex";
+}
+
+function cerrarModalVerCliente() {
+  const modal = document.getElementById("modalVerCliente");
+  if (modal) modal.style.display = "none";
+}
+
 function abrirModalCliente(id) {
   clienteActivoId = id;
   const client = clients.find(c => c.id === id);
@@ -2132,6 +2169,10 @@ function renderApp() {
             <span class="modal-icon">📄</span>
             <span>Últimos Pedidos</span>
           </button>
+          <button class="modal-btn" onclick="verDatosCliente()">
+            <span class="modal-icon">👁️</span>
+            <span>Ver Datos</span>
+          </button>
           <button class="modal-btn" onclick="abrirFormCliente(clienteActivoId)">
             <span class="modal-icon">✏️</span>
             <span>Editar Cliente</span>
@@ -2153,6 +2194,18 @@ function renderApp() {
             <span>Eliminar</span>
           </button>
         </div>
+      </div>
+    </div>
+
+    <!-- Modal: ver datos del cliente (solo lectura) -->
+    <div class="modal-overlay" id="modalVerCliente" style="display:none;" onclick="cerrarModalVerCliente()">
+      <div class="modal-card" onclick="event.stopPropagation()">
+        <button class="modal-close" onclick="cerrarModalVerCliente()">✕</button>
+        <div class="modal-header">
+          <strong id="verClienteNombre"></strong>
+        </div>
+        <div id="verClienteDatos" style="text-align:left; padding:6px 0 14px;"></div>
+        <button class="btn-primary btn-full" onclick="cerrarModalVerCliente(); abrirFormCliente(clienteActivoId);">✏️ Editar estos datos</button>
       </div>
     </div>
 
