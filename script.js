@@ -1858,12 +1858,16 @@ function enviarConfirmacionPago(id) {
   if (!order.pagos || order.pagos.length === 0) return alert("Este pedido todavía no tiene ningún pago registrado.");
 
   const ultimoPago = order.pagos[order.pagos.length - 1];
-  const saldo = calcularSaldo(order);
+  // Miramos la deuda TOTAL del cliente (todas sus facturas pendientes), no la de
+  // este pedido suelto. Así, si pagó un pedido pero le queda otro sin pagar, el
+  // mensaje le avisa el saldo que le queda — igual que en Deudores — en vez de
+  // decir "quedó al día" por error.
+  const deudaCliente = deudaTotalCliente(order.client.id);
   const nombre = order.client.nombre;
 
-  const msg = saldo <= 0
+  const msg = deudaCliente <= 0
     ? `Hola ${nombre} 👋\n\nConfirmo que recibí tu pago de *${formatCurrency(ultimoPago.monto)}*. Tu cuenta quedó al día. ¡Gracias! 🙌`
-    : `Hola ${nombre} 👋\n\nRecibí tu pago de *${formatCurrency(ultimoPago.monto)}*. Tu saldo pendiente actual es *${formatCurrency(saldo)}*. ¡Gracias!`;
+    : `Hola ${nombre} 👋\n\nConfirmo que recibí tu pago de *${formatCurrency(ultimoPago.monto)}*. Tu saldo pendiente actual es *${formatCurrency(deudaCliente)}*. ¡Gracias! 🙌`;
 
   const tel = order.client.telefono ? order.client.telefono.replace(/\D/g, "") : "";
   const url = tel ? `https://wa.me/54${tel}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
