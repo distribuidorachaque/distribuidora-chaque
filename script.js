@@ -594,6 +594,7 @@ function irACargarPedido() {
   cerrarModal();
   editingOrderId = null;
   currentItems   = [];
+  modoBorrador   = false;   // arranca siempre en OFF: no se arrastra el "ignorar stock" del cliente anterior
   filtroCategoria = "Todas";
   setVista("pedido");
 }
@@ -1190,6 +1191,7 @@ function editarPedido(id) {
   editingOrderId  = id;
   currentItems    = order.items.map(i => ({ ...i }));
   clienteActivoId = order.client.id;
+  modoBorrador    = !!order.borrador;   // el switch muestra si este pedido es borrador o no
   setVista("pedido");
 }
 
@@ -1704,6 +1706,15 @@ function guardarRecordatorioPago(id) {
   const c = clients.find(c => c.id === id);
   if (!c) return;
   c.recordatorioPago = fecha;
+  c.actualizadoEn = Date.now();
+  guardarStorage();
+  renderVistaDeudores();
+}
+
+function borrarRecordatorioPago(id) {
+  const c = clients.find(c => c.id === id);
+  if (!c) return;
+  c.recordatorioPago = "";
   c.actualizadoEn = Date.now();
   guardarStorage();
   renderVistaDeudores();
@@ -2426,40 +2437,17 @@ function renderVistaClientes() {
       </div>
     </div>
 
-    ${contarClientesInactivos() > 0 ? `
-    <div class="form-card" style="cursor:pointer; border-left:4px solid #dc2626;" onclick="setVista('inactivos')">
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <div>
-          <strong>⏰ ${contarClientesInactivos()} cliente${contarClientesInactivos() > 1 ? "s" : ""} sin comprarte hace ${DIAS_INACTIVIDAD_UMBRAL}+ días</strong>
-          <div class="muted" style="font-size:13px;">Tocá para ver la lista</div>
-        </div>
-        <span>›</span>
-      </div>
-    </div>` : ""}
-
-    ${(() => {
-      const cantPotenciales = clients.filter(c => !c.eliminado && c.potencial).length;
-      if (cantPotenciales === 0) return "";
-      return `
-      <div class="form-card" style="cursor:pointer; border-left:4px solid #16a34a;" onclick="setVista('potenciales')">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <div>
-            <strong>🌱 ${cantPotenciales} cliente${cantPotenciales > 1 ? "s" : ""} potencial${cantPotenciales > 1 ? "es" : ""}</strong>
-            <div class="muted" style="font-size:13px;">Tocá para verlos todos juntos</div>
-          </div>
-          <span>›</span>
-        </div>
-      </div>`;
-    })()}
-
-    <div class="form-card" style="cursor:pointer; border-left:4px solid #7c3aed;" onclick="setVista('mapa-rutas')">
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <div>
-          <strong>🗺️ Mapa de recorridos</strong>
-          <div class="muted" style="font-size:13px;">Ve a tus clientes en un mapa real y armá los grupos vos mismo</div>
-        </div>
-        <span>›</span>
-      </div>
+    <div class="tipo-tabs" style="margin-bottom:4px;">
+      ${(() => {
+        const cantPotenciales = clients.filter(c => !c.eliminado && c.potencial).length;
+        return cantPotenciales > 0
+          ? `<button class="tipo-tab" style="border-left:3px solid #16a34a;" onclick="setVista('potenciales')">🌱 Potenciales (${cantPotenciales})</button>`
+          : "";
+      })()}
+      <button class="tipo-tab" style="border-left:3px solid #7c3aed;" onclick="setVista('mapa-rutas')">🗺️ Mapa</button>
+      ${contarClientesInactivos() > 0
+        ? `<button class="tipo-tab" style="border-left:3px solid #dc2626;" onclick="setVista('inactivos')">⏰ Inactivos (${contarClientesInactivos()})</button>`
+        : ""}
     </div>
 
     <div class="search-box">
@@ -3505,9 +3493,10 @@ function renderVistaDeudores() {
               <div class="client-name">${c.nombre} ${badgeRecordatorio}</div>
               <div class="client-sub">${c.tipo || 'Otro'}</div>
               <div id="form-recordatorio-${c.id}" style="display:none; margin-top:8px;" onclick="event.stopPropagation()">
+                <input type="date" id="input-recordatorio-${c.id}" value="${c.recordatorioPago || ''}" style="margin-bottom:6px; width:100%;" />
                 <div class="row-2">
-                  <input type="date" id="input-recordatorio-${c.id}" value="${c.recordatorioPago || ''}" />
                   <button class="btn-success" onclick="guardarRecordatorioPago('${c.id}')">Guardar</button>
+                  <button class="btn-danger" onclick="borrarRecordatorioPago('${c.id}')">🗑️ Borrar</button>
                 </div>
               </div>
               <div id="form-pagodeuda-${c.id}" style="display:none; margin-top:8px; background:#f0fdf4; border-radius:10px; padding:10px;" onclick="event.stopPropagation()">
