@@ -3426,18 +3426,19 @@ function confirmarPagoTotalCliente(clienteId) {
     client.actualizadoEn = Date.now();
   }
 
-  const form = document.getElementById("form-pagodeuda-" + clienteId);
-  if (form) form.style.display = "none";
-
-  guardarStorage();
-  renderVistaDeudores();
-
-  // Ofrecemos mandarle un único mensaje avisándole del pago, en vez de uno
-  // por cada pedido.
+  // Preguntamos y, si dice que sí, abrimos WhatsApp en el MISMO toque —
+  // antes de guardar y de redibujar la pantalla. Si primero redibujábamos,
+  // el celular perdía el "toque" del usuario y abría la versión web de
+  // WhatsApp (y después la app, con los emojis rotos). Abriéndolo directo,
+  // el celu abre la app de una y los emojis salen bien, igual que el resto
+  // de los botones de WhatsApp.
   const avisar = confirm(deudaDespues <= 0
     ? `✅ Pago de ${formatCurrency(monto)} registrado. La cuenta de ${client.nombre} quedó al día.\n\n¿Le avisamos por WhatsApp?`
     : `✅ Pago de ${formatCurrency(monto)} registrado. Todavía le queda un saldo de ${formatCurrency(deudaDespues)}.\n\n¿Le avisamos por WhatsApp?`);
   if (avisar) enviarAvisoPagoRegistrado(clienteId, monto, medio, deudaDespues);
+
+  guardarStorage();
+  renderVistaDeudores();
 }
 
 function enviarAvisoPagoRegistrado(clienteId, monto, medio, deudaRestante) {
