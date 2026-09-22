@@ -2483,7 +2483,6 @@ function renderVistaClientes() {
         ? `<div class="empty-state">No hay clientes en esta categoría.<br>Tocá <strong>+ Nuevo</strong> para agregar uno.</div>`
         : lista.map(c => {
             const pedidosCliente = orders.filter(o => o.client.id === c.id && !o.eliminado).length;
-            const tieneDeuda = clienteTieneDeuda(c.id);
             const montoDeuda = deudaTotalCliente(c.id);
             const dias = diasSinComprar(c.id);
 const sinComprar = cuentaInactividad(c) && dias !== null && dias >= umbralInactividad(c);
@@ -2504,7 +2503,7 @@ const sinComprar = cuentaInactividad(c) && dias !== null && dias >= umbralInacti
                 <div class="client-info">
                   <div class="client-name">
                     ${c.potencial ? '🌱 ' : ''}${c.nombre}
-                    ${tieneDeuda ? ` <span class="badge-deuda">💰 ${formatCurrency(montoDeuda)}</span>` : ''}
+                    ${montoDeuda > 0 ? ` <span class="badge-deuda">💰 ${formatCurrency(montoDeuda)}</span>` : ''}
                    ${sinComprar && !c.potencial ? ` <span class="badge-sin-comprar">⏰ ${dias}d</span>` : ''}
                     ${badgeSeguimiento}
                   </div>
