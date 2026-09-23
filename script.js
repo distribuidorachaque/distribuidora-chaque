@@ -473,6 +473,10 @@ function priceWithIVA(p) { return Number(p || 0) * (1 + IVA_RATE); }
 
 // ── Navegación ───────────────────────────────────────────────────────────────
 function setVista(vista, clienteId) {
+  // Al salir de la pantalla de Clientes limpiamos el buscador, así cuando
+  // volvés aparece vacío y listo para buscar otro cliente (no queda pegado
+  // lo que habías buscado antes de irte a Resumen, Stock, etc.).
+  if (vista !== "clientes") busquedaCliente = "";
   vistaActual = vista;
   if (clienteId !== undefined) clienteActivoId = clienteId;
   cerrarModal();
