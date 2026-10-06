@@ -835,15 +835,23 @@ function getPrecioConDescuento() {
 function autocompletarProducto() {
   const prod = catalog.find(p => p.id === document.getElementById("productoSelect").value);
   if (!prod) return;
-  document.getElementById("precioVenta").value = prod.precioVentaSinIVA;
+
+  // Si el cliente activo es tipo "Otro" y el producto tiene precio público, usarlo
+  const client = clients.find(c => c.id === clienteActivoId);
+  const esPublico = client && (client.tipo || "Otro") === "Otro" && prod.precioPublico > 0;
+  const precioBase = esPublico ? prod.precioPublico : prod.precioVentaSinIVA;
+
+  document.getElementById("precioVenta").value = precioBase;
   const cantInput = document.getElementById("cantidad");
   if (cantInput) cantInput.value = "";
   const info = document.getElementById("infoPrecioProducto");
   const disponible = getDisponibleParaAgregar(prod.id);
   const claseHint = disponible <= 0 ? 'hint-agotado' : (disponible <= STOCK_BAJO_UMBRAL ? 'hint-bajo' : '');
   if (info) info.innerHTML = `
-    <span class="price-hint">s/IVA: ${formatCurrency(prod.precioVentaSinIVA)}</span>
-    <span class="price-hint">c/IVA: ${formatCurrency(priceWithIVA(prod.precioVentaSinIVA))}</span>
+    <span class="price-hint">s/IVA: ${formatCurrency(precioBase)}</span>
+    <span class="price-hint">c/IVA: ${formatCurrency(priceWithIVA(precioBase))}</span>
+    ${esPublico ? `<span class="price-hint" style="color:#7c3aed;font-weight:600">🏷️ Precio público</span>` : ""}
+    ${!esPublico && prod.precioPublico > 0 ? `<span class="price-hint muted">Público: ${formatCurrency(prod.precioPublico)}</span>` : ""}
     <span class="price-hint stock-hint ${claseHint}">Disponible: ${disponible}${disponible > 0 && disponible <= STOCK_BAJO_UMBRAL ? ' ⚠️' : ''}</span>
     ${IMAGENES_PRODUCTO[prod.nombre] ? `<button type="button" class="price-hint" style="border:none; cursor:pointer;" onclick="mostrarImagenProducto('${prod.nombre}')">📷 Ver imagen</button>` : ''}
   `;
@@ -2106,6 +2114,7 @@ function guardarNuevoProducto() {
   const codigo = document.getElementById("nuevoProductoCodigo").value.trim();
   const costoVal = document.getElementById("nuevoProductoCosto").value;
   const stock = parseInt(document.getElementById("nuevoProductoStock").value) || 0;
+  const precioPublicoVal = document.getElementById("nuevoProductoPrecioPublico")?.value || "";
 
   if (!nombre) return alert("Escribí el nombre del producto");
   if (!categoria) return alert("Escribí la marca / categoría del producto");
@@ -2127,11 +2136,15 @@ function guardarNuevoProducto() {
   };
   if (codigo) nuevo.codigo = codigo;
   if (costoVal.trim() !== "") nuevo.costo = parseNumber(costoVal);
+  if (precioPublicoVal.trim() !== "") {
+    const pp = parseNumber(precioPublicoVal);
+    if (pp > 0) nuevo.precioPublico = pp;
+  }
 
   catalog.push(nuevo);
   guardarStorage();
 
-  ["nuevoProductoNombre", "nuevoProductoCategoria", "nuevoProductoPrecio", "nuevoProductoCodigo", "nuevoProductoCosto", "nuevoProductoComision", "nuevoProductoStock"]
+  ["nuevoProductoNombre", "nuevoProductoCategoria", "nuevoProductoPrecio", "nuevoProductoCodigo", "nuevoProductoCosto", "nuevoProductoComision", "nuevoProductoStock", "nuevoProductoPrecioPublico"]
     .forEach(id => { const el = document.getElementById(id); if (el) el.value = ""; });
 
   const form = document.getElementById("form-nuevo-producto");
@@ -2172,12 +2185,18 @@ function guardarPrecio(id) {
     if (!confirm(`Ya tenés otro producto llamado "${otroConMismoNombre.nombre}". ¿Igual querés dejarlo así?`)) return;
   }
 
+  const precioPublicoInput = document.getElementById("input-preciopublico-" + id);
   const categoriaVieja = prod.categoria;
   prod.nombre = nuevoNombre;
   prod.categoria = nuevaCategoria;
   prod.precioVentaSinIVA = nuevoPrecio;
   if (costoInput && costoInput.value.trim() !== "") prod.costo = nuevoCosto;
   prod.codigo = nuevoCodigo;
+  if (precioPublicoInput) {
+    const pp = parseNumber(precioPublicoInput.value);
+    if (precioPublicoInput.value.trim() !== "" && pp > 0) prod.precioPublico = pp;
+    else delete prod.precioPublico;
+  }
   prod.actualizadoEn = Date.now();
   guardarStorage();
   if (nuevaCategoria !== categoriaVieja) filtroStock = nuevaCategoria;
@@ -4533,6 +4552,10 @@ function renderVistaStock() {
           <input id="nuevoProductoCodigo" type="number" placeholder="Ej: 400" />
         </div>
       </div>
+      <div class="form-group">
+        <label>Precio público (s/IVA, opcional)</label>
+        <input id="nuevoProductoPrecioPublico" type="number" placeholder="Para clientes tipo Otro" />
+      </div>
       <div class="row-2">
         <div class="form-group" style="margin:0;">
           <label>Costo (opcional)</label>
@@ -4597,7 +4620,7 @@ function renderVistaStock() {
         <div class="stock-row">
           <div style="flex:1;">
             <div class="stock-nombre">${codigoActual ? `#${codigoActual} · ` : ""}${p.nombre}</div>
-            <div class="muted">${p.categoria} · s/IVA: ${formatCurrency(p.precioVentaSinIVA)} · Costo: ${costoActual > 0 ? formatCurrency(costoActual) : "sin cargar ⚠️"}</div>
+            <div class="muted">${p.categoria} · s/IVA: ${formatCurrency(p.precioVentaSinIVA)}${p.precioPublico > 0 ? ` · 🏷️ Público: ${formatCurrency(p.precioPublico)}` : ""} · Costo: ${costoActual > 0 ? formatCurrency(costoActual) : "sin cargar ⚠️"}</div>
             <div id="form-precio-${p.id}" style="display:none; margin-top:8px;">
               <div class="row-2">
                 <div class="form-group" style="margin:0;">
@@ -4618,6 +4641,10 @@ function renderVistaStock() {
                   <label>Precio de venta (s/IVA)</label>
                   <input id="input-precio-${p.id}" type="number" placeholder="Precio de venta" value="${p.precioVentaSinIVA}" />
                 </div>
+              </div>
+              <div class="form-group" style="margin:8px 0 0;">
+                <label>Precio público (s/IVA, para clientes Otro)</label>
+                <input id="input-preciopublico-${p.id}" type="number" placeholder="Sin cargar" value="${p.precioPublico > 0 ? p.precioPublico : ''}" />
               </div>
               <div class="form-group" style="margin:8px 0 0;">
                 <label>Costo (lo que pagás vos, o le corresponde al proveedor)</label>
