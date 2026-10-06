@@ -1605,15 +1605,15 @@ function calcularVentasUltimosMeses(mesFin, anioFin, cantidad) {
 // Ranking de lo que más se vende dentro de una marca puntual — pensado para
 // saber qué reponer. Se ordena por CANTIDAD vendida (no por plata), que es
 // lo que importa a la hora de hacer el pedido al distribuidor.
+const MESES_ES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+
 function calcularRankingVentasMarca(marca, soloEsteMes) {
-  const hoy = new Date();
-  const mesActual = hoy.getMonth() + 1, anioActual = hoy.getFullYear();
   const porProducto = {};
   orders.forEach(o => {
     if (o.borrador || o.eliminado) return;
     if (soloEsteMes) {
       const partes = o.fecha.replace(/,.*/, "").split("/");
-      if (parseInt(partes[1]) !== mesActual || parseInt(partes[2]) !== anioActual) return;
+      if (parseInt(partes[1]) !== mesRankingStock.mes || parseInt(partes[2]) !== mesRankingStock.anio) return;
     }
     o.items.forEach(i => {
       if (i.categoria !== marca) return;
@@ -1628,8 +1628,25 @@ function calcularRankingVentasMarca(marca, soloEsteMes) {
 }
 
 let modoRankingStock = "mes";
+let mesRankingStock = (() => { const h = new Date(); return { mes: h.getMonth()+1, anio: h.getFullYear() }; })();
+
 function cambiarModoRankingStock(modo) {
   modoRankingStock = modo;
+  if (modo === "mes") {
+    const h = new Date();
+    mesRankingStock = { mes: h.getMonth()+1, anio: h.getFullYear() };
+  }
+  renderVistaStock();
+}
+
+function navegarMesRanking(delta) {
+  let { mes, anio } = mesRankingStock;
+  mes += delta;
+  if (mes > 12) { mes = 1; anio++; }
+  if (mes < 1)  { mes = 12; anio--; }
+  const hoy = new Date();
+  if (anio > hoy.getFullYear() || (anio === hoy.getFullYear() && mes > hoy.getMonth()+1)) return;
+  mesRankingStock = { mes, anio };
   renderVistaStock();
 }
 
@@ -4672,15 +4689,24 @@ function renderVistaStock() {
     ${filtroStock !== "Todas" ? (() => {
       const ranking = calcularRankingVentasMarca(filtroStock, modoRankingStock === "mes");
       const medallas = ["🥇", "🥈", "🥉"];
+      const hoy = new Date();
+      const esMesActual = mesRankingStock.mes === hoy.getMonth()+1 && mesRankingStock.anio === hoy.getFullYear();
+      const nombreMes = `${MESES_ES[mesRankingStock.mes-1]} ${mesRankingStock.anio}`;
       return `
       <div class="form-card">
         <h3 class="section-title">🏆 Lo que más vendés de ${filtroStock}</h3>
         <div class="tipo-tabs" style="margin-bottom:10px;">
-          <button class="tipo-tab ${modoRankingStock === "mes" ? "active" : ""}" onclick="cambiarModoRankingStock('mes')">Este mes</button>
+          <button class="tipo-tab ${modoRankingStock === "mes" ? "active" : ""}" onclick="cambiarModoRankingStock('mes')">Por mes</button>
           <button class="tipo-tab ${modoRankingStock === "acumulado" ? "active" : ""}" onclick="cambiarModoRankingStock('acumulado')">Acumulado</button>
         </div>
+        ${modoRankingStock === "mes" ? `
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+          <button class="btn-sm btn-outline" onclick="navegarMesRanking(-1)" style="padding:4px 10px; font-size:1rem;">←</button>
+          <span style="flex:1; text-align:center; font-weight:600;">${nombreMes}</span>
+          <button class="btn-sm btn-outline" onclick="navegarMesRanking(1)" style="padding:4px 10px; font-size:1rem;" ${esMesActual ? "disabled" : ""}>→</button>
+        </div>` : ""}
         ${ranking.length === 0
-          ? `<div class="muted">Todavía no hay ventas de ${filtroStock} ${modoRankingStock === "mes" ? "este mes" : "registradas"}.</div>`
+          ? `<div class="muted">Todavía no hay ventas de ${filtroStock} ${modoRankingStock === "mes" ? `en ${nombreMes}` : "registradas"}.</div>`
           : ranking.map((p, i) => `
             <div class="stock-row">
               <div>
