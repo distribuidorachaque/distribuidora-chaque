@@ -180,7 +180,7 @@ Object.keys(metaPorMes).forEach(k => {
 if (huboMigracionLocal) {
   configVehiculo.actualizadoEn = Date.now();
   localStorage.setItem("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
-  fetch(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "vehiculo", payload: [configVehiculo] }) });
+  fetchConTimeout(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "vehiculo", payload: [configVehiculo] }) });
 }
 // A partir de acá, kmPorMes y metaPorMes apuntan al mismo objeto que
 // configVehiculo.kmPorMes/.metaPorMes, así que todo el código que ya
@@ -211,12 +211,47 @@ let syncEnCurso = false;
 // la respuesta), la app nunca se enteraba. Ahora: manda los datos, espera un
 // segundo, y vuelve a consultar Drive para confirmar que realmente llegaron.
 // Si no coincide, reintenta hasta 3 veces antes de avisar que falló.
-async function guardarEnDriveConVerificacion(onProgreso) {
-  if (syncEnCurso) {
-    // Ya hay otro guardado/sincronización en curso: esperamos un poco y
-    // probamos de nuevo en vez de pisarlo.
-    await new Promise(r => setTimeout(r, 800));
-    return guardarEnDriveConVerificacion(onProgreso);
+// Toda llamada a Google tiene un tiempo máximo: si Google se cuelga, cortamos
+// y seguimos, en vez de dejar la app "Guardando..." varios minutos.
+function fetchConTimeout(url, opciones, ms) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms || 30000);
+  return fetch(url, { ...(opciones || {}), signal: ctrl.signal }).finally(() => clearTimeout(t));
+}
+
+// Un solo guardado a la vez. Si mientras se guarda llegan más pedidos de
+// guardado (cargaste varias cosas seguidas), NO se encolan uno por cada
+// cambio: se anota que hay algo pendiente y se hace UNA sola vuelta más al
+// terminar, que ya lleva todo lo último.
+let guardadoEnCurso = null;
+let guardadoPendiente = false;
+
+function guardarEnDriveConVerificacion(onProgreso) {
+  if (guardadoEnCurso) {
+    guardadoPendiente = true;
+    return guardadoEnCurso;
+  }
+  guardadoEnCurso = (async () => {
+    let ok = false;
+    try {
+      do {
+        guardadoPendiente = false;
+        ok = await guardarEnDriveUnaVez(onProgreso);
+      } while (guardadoPendiente);
+    } finally {
+      guardadoEnCurso = null;
+    }
+    return ok;
+  })();
+  return guardadoEnCurso;
+}
+
+async function guardarEnDriveUnaVez(onProgreso) {
+  // Si hay una sincronización (lectura) en curso, esperamos a que termine,
+  // pero como mucho 45 segundos: nunca nos quedamos trabados para siempre.
+  const inicioEspera = Date.now();
+  while (syncEnCurso && Date.now() - inicioEspera < 45000) {
+    await new Promise(r => setTimeout(r, 400));
   }
 
   syncEnCurso = true;
@@ -228,10 +263,10 @@ async function guardarEnDriveConVerificacion(onProgreso) {
     // nuevos hechos en otro dispositivo (ej: un pago confirmado en el celu).
     try {
       const [rC0, rCat0, rP0, rI0] = await Promise.all([
-        fetch(API_URL + "?tipo=clientes"),
-        fetch(API_URL + "?tipo=catalogo"),
-        fetch(API_URL + "?tipo=pedidos"),
-        fetch(API_URL + "?tipo=inversiones")
+        fetchConTimeout(API_URL + "?tipo=clientes"),
+        fetchConTimeout(API_URL + "?tipo=catalogo"),
+        fetchConTimeout(API_URL + "?tipo=pedidos"),
+        fetchConTimeout(API_URL + "?tipo=inversiones")
       ]);
       const [dC0, dCat0, dP0, dI0] = await Promise.all([rC0.json(), rCat0.json(), rP0.json(), rI0.json()]);
       if (dC0.length > 0)   clients = fusionarPorId(clients, dC0.map(r => JSON.parse(r[0])));
@@ -243,26 +278,26 @@ async function guardarEnDriveConVerificacion(onProgreso) {
       console.log("No se pudo repasar con Drive antes de guardar, sigue con lo local:", e);
     }
 
-    const maxIntentos = 3;
+    const maxIntentos = 2;
 
     for (let intento = 1; intento <= maxIntentos; intento++) {
       if (onProgreso) onProgreso(intento, maxIntentos);
 
       try {
         await Promise.all([
-          fetch(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "clientes", payload: clients }) }),
-          fetch(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "catalogo", payload: catalog }) }),
-          fetch(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "pedidos",  payload: orders  }) }),
-          fetch(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "inversiones", payload: inversiones }) })
+          fetchConTimeout(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "clientes", payload: clients }) }),
+          fetchConTimeout(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "catalogo", payload: catalog }) }),
+          fetchConTimeout(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "pedidos",  payload: orders  }) }),
+          fetchConTimeout(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "inversiones", payload: inversiones }) })
         ]);
 
-        await new Promise(r => setTimeout(r, 1500 + intento * 1000)); // más margen en cada reintento
+        await new Promise(r => setTimeout(r, intento === 1 ? 500 : 1500 * intento)); // el envío ya esperó la respuesta de Google; el margen extra es solo para reintentos
 
         const [rC, rCat, rP, rI] = await Promise.all([
-          fetch(API_URL + "?tipo=clientes"),
-          fetch(API_URL + "?tipo=catalogo"),
-          fetch(API_URL + "?tipo=pedidos"),
-          fetch(API_URL + "?tipo=inversiones")
+          fetchConTimeout(API_URL + "?tipo=clientes"),
+          fetchConTimeout(API_URL + "?tipo=catalogo"),
+          fetchConTimeout(API_URL + "?tipo=pedidos"),
+          fetchConTimeout(API_URL + "?tipo=inversiones")
         ]);
         const [dC, dCat, dP, dI] = await Promise.all([rC.json(), rCat.json(), rP.json(), rI.json()]);
 
@@ -279,10 +314,12 @@ async function guardarEnDriveConVerificacion(onProgreso) {
   }
 }
 
+let ultimoAvisoGuardadoFallido = 0;
 async function guardarStorage() {
   guardarLocal();
   const ok = await guardarEnDriveConVerificacion();
-  if (!ok) {
+  if (!ok && Date.now() - ultimoAvisoGuardadoFallido > 60000) {
+    ultimoAvisoGuardadoFallido = Date.now();
     alert("⚠️ No se pudo confirmar el guardado en Google Drive después de varios intentos. No perdiste nada — está guardado en este dispositivo. Tocá '☁️ Guardar ahora' más tarde con buena conexión.");
   }
 }
@@ -297,10 +334,10 @@ async function forzarRecargaDrive() {
   let necesitaPush = false;
   try {
     const [rC, rCat, rP, rI] = await Promise.all([
-      fetch(API_URL + "?tipo=clientes"),
-      fetch(API_URL + "?tipo=catalogo"),
-      fetch(API_URL + "?tipo=pedidos"),
-      fetch(API_URL + "?tipo=inversiones")
+      fetchConTimeout(API_URL + "?tipo=clientes"),
+      fetchConTimeout(API_URL + "?tipo=catalogo"),
+      fetchConTimeout(API_URL + "?tipo=pedidos"),
+      fetchConTimeout(API_URL + "?tipo=inversiones")
     ]);
     const [dC, dCat, dP, dI] = await Promise.all([rC.json(), rCat.json(), rP.json(), rI.json()]);
 
@@ -341,10 +378,10 @@ async function sincronizarSilencioso() {
   let necesitaPush = false;
   try {
     const [rC, rCat, rP, rI] = await Promise.all([
-      fetch(API_URL + "?tipo=clientes"),
-      fetch(API_URL + "?tipo=catalogo"),
-      fetch(API_URL + "?tipo=pedidos"),
-      fetch(API_URL + "?tipo=inversiones")
+      fetchConTimeout(API_URL + "?tipo=clientes"),
+      fetchConTimeout(API_URL + "?tipo=catalogo"),
+      fetchConTimeout(API_URL + "?tipo=pedidos"),
+      fetchConTimeout(API_URL + "?tipo=inversiones")
     ]);
     const [dC, dCat, dP, dI] = await Promise.all([rC.json(), rCat.json(), rP.json(), rI.json()]);
 
@@ -397,10 +434,10 @@ async function cargarDatos() {
   let dC = [], dCat = [], dP = [], dI = [];
   try {
     const [rC, rCat, rP, rI] = await Promise.all([
-      fetch(API_URL + "?tipo=clientes"),
-      fetch(API_URL + "?tipo=catalogo"),
-      fetch(API_URL + "?tipo=pedidos"),
-      fetch(API_URL + "?tipo=inversiones")
+      fetchConTimeout(API_URL + "?tipo=clientes"),
+      fetchConTimeout(API_URL + "?tipo=catalogo"),
+      fetchConTimeout(API_URL + "?tipo=pedidos"),
+      fetchConTimeout(API_URL + "?tipo=inversiones")
     ]);
     [dC, dCat, dP, dI] = await Promise.all([rC.json(), rCat.json(), rP.json(), rI.json()]);
 
@@ -451,8 +488,11 @@ async function cargarDatos() {
   // armando un pedido) justo cuando termina de sincronizar, no le pisamos
   // la pantalla — los datos ya quedaron guardados igual, se van a ver la
   // próxima vez que cambie de pantalla.
-  if (vistaActual !== "form-cliente" && vistaActual !== "pedido") renderApp();
-  syncEnCurso = false;
+  try {
+    if (vistaActual !== "form-cliente" && vistaActual !== "pedido") renderApp();
+  } finally {
+    syncEnCurso = false;
+  }
 
   // Si después de fusionar y deduplicar quedó más de lo que Drive tenía
   // (había algo local que Drive todavía no tenía), lo empujamos de vuelta.
@@ -1412,7 +1452,7 @@ function guardarConfigVehiculo() {
   };
   localStorage.setItem("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
   // La mandamos a Drive para que se vea igual en todos tus dispositivos
-  fetch(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "vehiculo", payload: [configVehiculo] }) });
+  fetchConTimeout(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "vehiculo", payload: [configVehiculo] }) });
   kmPorMes = configVehiculo.kmPorMes;
   metaPorMes = configVehiculo.metaPorMes;
   renderVistaResumen();
@@ -1420,7 +1460,7 @@ function guardarConfigVehiculo() {
 // (por ejemplo, la cargaste desde el celu), la trae y la usa acá también.
 async function sincronizarConfigVehiculo() {
   try {
-    const r = await fetch(API_URL + "?tipo=vehiculo");
+    const r = await fetchConTimeout(API_URL + "?tipo=vehiculo");
     const filas = await r.json();
     if (filas.length === 0) return;
     const remoto = JSON.parse(filas[0][0]);
@@ -1606,7 +1646,7 @@ function guardarMetaMes() {
   metaPorMes[mesResumen] = val;
   configVehiculo.actualizadoEn = Date.now();
   localStorage.setItem("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
-  fetch(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "vehiculo", payload: [configVehiculo] }) });
+  fetchConTimeout(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "vehiculo", payload: [configVehiculo] }) });
   renderVistaResumen();
 }
 
@@ -4523,7 +4563,7 @@ function guardarKmMes() {
   kmPorMes[mesResumen] = parseInt(document.getElementById("inputKmMes").value) || 0;
   configVehiculo.actualizadoEn = Date.now();
   localStorage.setItem("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
-  fetch(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "vehiculo", payload: [configVehiculo] }) });
+  fetchConTimeout(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "vehiculo", payload: [configVehiculo] }) });
   renderVistaResumen();
 }
 
