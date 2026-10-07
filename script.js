@@ -807,7 +807,8 @@ function renderSelectProductos() {
   s.innerHTML = `<option value="">Seleccionar producto</option>` +
     prods.map(p => {
       const aviso = p.stock === 0 ? " ⛔" : (p.stock <= STOCK_BAJO_UMBRAL ? " ⚠️" : "");
-      return `<option value="${p.id}">${p.nombre} (Stock: ${p.stock})${aviso}</option>`;
+      const pr = preciosParaClienteActivo(p);
+      return `<option value="${p.id}">${p.nombre} — ${pr.usaPublico ? "🏷️ " : ""}${formatCurrency(pr.precio)} (Stock: ${p.stock})${aviso}</option>`;
     }).join("");
 }
 
@@ -832,6 +833,25 @@ function getPrecioConDescuento() {
   return precioBase * (1 - pct / 100);
 }
 
+// ¿El pedido que se está cargando es de un cliente tipo "Otro" (precio público)?
+function clienteActivoEsPublico() {
+  const client = clients.find(c => c.id === clienteActivoId);
+  return !!client && (client.tipo || "Otro") === "Otro";
+}
+
+// Precio que le corresponde al cliente activo para ese producto, y el "otro"
+// precio (para tenerlo a la vista si te lo preguntan mientras cargás).
+function preciosParaClienteActivo(prod) {
+  const tienePublico = prod.precioPublico > 0;
+  const usaPublico = clienteActivoEsPublico() && tienePublico;
+  return {
+    usaPublico,
+    precio: usaPublico ? prod.precioPublico : prod.precioVentaSinIVA,
+    otro: tienePublico ? (usaPublico ? prod.precioVentaSinIVA : prod.precioPublico) : null,
+    etiquetaOtro: usaPublico ? "Mayorista" : "Público"
+  };
+}
+
 function autocompletarProducto() {
   const prod = catalog.find(p => p.id === document.getElementById("productoSelect").value);
   if (!prod) return;
@@ -852,6 +872,7 @@ function autocompletarProducto() {
     <span class="price-hint">c/IVA: ${formatCurrency(priceWithIVA(precioBase))}</span>
     ${esPublico ? `<span class="price-hint" style="color:#7c3aed;font-weight:600">🏷️ Precio público</span>` : ""}
     ${!esPublico && prod.precioPublico > 0 ? `<span class="price-hint muted">Público: ${formatCurrency(prod.precioPublico)}</span>` : ""}
+    ${esPublico ? `<span class="price-hint muted">Mayorista: ${formatCurrency(prod.precioVentaSinIVA)}</span>` : ""}
     <span class="price-hint stock-hint ${claseHint}">Disponible: ${disponible}${disponible > 0 && disponible <= STOCK_BAJO_UMBRAL ? ' ⚠️' : ''}</span>
     ${IMAGENES_PRODUCTO[prod.nombre] ? `<button type="button" class="price-hint" style="border:none; cursor:pointer;" onclick="mostrarImagenProducto('${prod.nombre}')">📷 Ver imagen</button>` : ''}
   `;
@@ -940,7 +961,11 @@ function buscarPorCodigo() {
         ${parciales.map(p => `
           <div onclick="elegirCodigoDeLaLista('${p.id}')" style="padding:10px 12px; border-bottom:1px solid #f0f0f0; cursor:pointer; display:flex; justify-content:space-between; align-items:center;">
             <div><strong>${codigoDeProducto(p)}</strong> — ${p.nombre}</div>
-            <div class="muted" style="font-size:13px;">${formatCurrency(p.precioVentaSinIVA)}</div>
+            ${(() => { const pr = preciosParaClienteActivo(p); return `
+            <div style="text-align:right; white-space:nowrap; padding-left:8px;">
+              <div style="font-size:14px; font-weight:600; ${pr.usaPublico ? "color:#7c3aed;" : ""}">${pr.usaPublico ? "🏷️ " : ""}${formatCurrency(pr.precio)}</div>
+              ${pr.otro ? `<div class="muted" style="font-size:11px;">${pr.etiquetaOtro}: ${formatCurrency(pr.otro)}</div>` : ""}
+            </div>`; })()}
           </div>
         `).join("")}
       </div>
@@ -962,10 +987,12 @@ function mostrarProductoConfirmado(prod) {
   const stockTxt = disponible <= 0
     ? `<span style="color:#dc2626;">sin disponible${reservado > 0 ? " (ya reservado en borradores)" : ""}</span>`
     : (disponible <= STOCK_BAJO_UMBRAL ? `<span style="color:#d97706;">disponible: ${disponible}</span>` : `disponible: ${disponible}`);
+  const pr = preciosParaClienteActivo(prod);
   info.innerHTML = `
     <div style="background:#ecfdf5; border:1px solid #059669; border-radius:10px; padding:10px 12px;">
       <div style="font-size:16px; font-weight:600; color:#065f46;">✅ ${prod.nombre}</div>
-      <div class="muted" style="font-size:13px; margin-top:2px;">${formatCurrency(prod.precioVentaSinIVA)} · ${stockTxt}</div>
+      <div style="font-size:15px; font-weight:600; margin-top:3px; ${pr.usaPublico ? "color:#7c3aed;" : "color:#065f46;"}">${pr.usaPublico ? "🏷️ Precio público: " : "Precio: "}${formatCurrency(pr.precio)}</div>
+      <div class="muted" style="font-size:13px; margin-top:2px;">${pr.otro ? `${pr.etiquetaOtro}: ${formatCurrency(pr.otro)} · ` : ""}${stockTxt}</div>
     </div>
   `;
 }
