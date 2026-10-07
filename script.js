@@ -2563,6 +2563,7 @@ function renderVistaClientes() {
     <div class="page-header" style="flex-direction:column; align-items:stretch; gap:10px;">
       <div>
         <h1 class="page-title">🪵 Distribuidora Chaque</h1>
+        <div class="muted page-sub">Sistema de pedidos</div>
       </div>
       <div class="tipo-tabs">
         <button class="tipo-tab" onclick="abrirFormCliente(null)">+ Nuevo</button>
