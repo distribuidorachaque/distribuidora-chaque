@@ -3663,6 +3663,37 @@ function enviarAvisoPagoRegistrado(clienteId, monto, medio, deudaRestante) {
   window.open(url, "_blank");
 }
 
+// ── Buscador de Deudores ──
+// Filtra la lista sin volver a dibujar la pantalla, así no se pierde el foco
+// del teclado ni se cierran los formularios de pago que tengas abiertos.
+let busquedaDeudores = "";
+
+function normalizarTextoBusqueda(t) {
+  return String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function filtrarDeudores(valor) {
+  busquedaDeudores = valor;
+  const q = normalizarTextoBusqueda(valor).trim();
+  const items = document.querySelectorAll("#listaDeudores .deudor-item");
+  let visibles = 0;
+  items.forEach(el => {
+    const coincide = !q || (el.dataset.busqueda || "").includes(q);
+    el.style.display = coincide ? "" : "none";
+    if (coincide) visibles++;
+  });
+  const info = document.getElementById("infoBusquedaDeudores");
+  if (info) info.textContent = q ? (visibles === 0 ? "Ningún deudor coincide con la búsqueda." : `Mostrando ${visibles} de ${items.length}`) : "";
+  const btnX = document.getElementById("btnLimpiarBusquedaDeudores");
+  if (btnX) btnX.style.display = q ? "" : "none";
+}
+
+function limpiarBusquedaDeudores() {
+  const input = document.getElementById("inputBusquedaDeudores");
+  if (input) { input.value = ""; input.focus(); }
+  filtrarDeudores("");
+}
+
 function renderVistaDeudores() {
   const cont = document.getElementById("vista-contenido");
   if (!cont) return;
@@ -3688,6 +3719,12 @@ function renderVistaDeudores() {
           <div class="muted">Total pendiente de cobro</div>
           <strong>${formatCurrency(totalGeneral)}</strong>
         </div>
+        <div class="search-box">
+          <input id="inputBusquedaDeudores" type="text" placeholder="🔍 Buscar deudor por nombre, teléfono o zona" value="${busquedaDeudores.replace(/"/g, "&quot;")}" oninput="filtrarDeudores(this.value)" />
+          <button id="btnLimpiarBusquedaDeudores" class="search-clear" onclick="limpiarBusquedaDeudores()" style="${busquedaDeudores ? "" : "display:none;"}">✕</button>
+        </div>
+        <p id="infoBusquedaDeudores" class="muted" style="margin:2px 0 8px; font-size:13px;"></p>
+        <div id="listaDeudores">
         ${deudores.map(c => {
           let badgeRecordatorio = "";
           if (c.recordatorioPago) {
@@ -3698,7 +3735,7 @@ function renderVistaDeudores() {
             else if (diffRec <= 3) badgeRecordatorio = `<span class="badge-seguimiento proximo">🔔 En ${diffRec}d</span>`;
           }
           return `
-          <div class="client-item" onclick="abrirModalCliente('${c.id}')">
+          <div class="client-item deudor-item" data-busqueda="${normalizarTextoBusqueda([c.nombre, c.telefono, c.telefono2, c.zona, c.direccion, c.tipo].filter(Boolean).join(" ")).replace(/"/g, "")}" onclick="abrirModalCliente('${c.id}')">
             <div class="client-tipo-dot tipo-${(c.tipo||'Otro').toLowerCase().replace('é','e').replace('ú','u')}"></div>
             <div class="client-info">
               <div class="client-name">${c.nombre} ${badgeRecordatorio}</div>
@@ -3728,9 +3765,13 @@ function renderVistaDeudores() {
           </div>
         `;
         }).join("")}
+        </div>
       `
     }
   `;
+  // Si había una búsqueda escrita (por ejemplo, después de registrar un pago
+  // la pantalla se vuelve a dibujar), la volvemos a aplicar.
+  if (busquedaDeudores) filtrarDeudores(busquedaDeudores);
 }
 
 // ── Vista: RESUMEN ────────────────────────────────────────────────────────────
