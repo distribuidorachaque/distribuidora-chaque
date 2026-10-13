@@ -505,9 +505,37 @@ async function cargarDatos() {
 function formatCurrency(v) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 2 }).format(Number(v || 0));
 }
+// Entiende montos escritos de cualquier forma:
+//   "1.355.293,60" (como en Argentina)  → 1355293.6
+//   "1355293,60" / "1355293.60" / "1355293" / "$ 1.355" (= mil trescientos cincuenta y cinco)
+// Regla: si hay punto y coma, el que va último es el de los decimales. Si hay
+// varios puntos (o varias comas), son de miles. Un solo punto seguido de
+// exactamente 3 cifras, con 1 a 3 cifras adelante ("1.355"), es de miles.
 function parseNumber(v) {
-  const n = Number(String(v || "").replace(/\./g, "").replace(",", ".").replace(/[^\d.-]/g, ""));
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  let s = String(v || "").trim().replace(/[^\d.,-]/g, "");
+  if (!s) return 0;
+  const ultPunto = s.lastIndexOf("."), ultComa = s.lastIndexOf(",");
+  if (ultPunto > -1 && ultComa > -1) {
+    s = ultComa > ultPunto ? s.replace(/\./g, "").replace(",", ".") : s.replace(/,/g, "");
+  } else if (ultComa > -1) {
+    s = (s.match(/,/g).length > 1) ? s.replace(/,/g, "") : s.replace(",", ".");
+  } else if (ultPunto > -1) {
+    if (s.match(/\./g).length > 1) {
+      s = s.replace(/\./g, "");
+    } else {
+      const [ent, dec] = s.split(".");
+      const cifrasEnt = ent.replace("-", "").length;
+      if (dec.length === 3 && cifrasEnt >= 1 && cifrasEnt <= 3) s = ent + dec;
+    }
+  }
+  const n = Number(s);
   return Number.isFinite(n) ? n : 0;
+}
+
+// Para precargar un monto en un campo: redondeado a 2 decimales.
+function montoParaInput(n) {
+  return Math.round((Number(n) || 0) * 100) / 100;
 }
 function priceWithIVA(p) { return Number(p || 0) * (1 + IVA_RATE); }
 
@@ -901,7 +929,7 @@ function autocompletarProducto() {
   const esPublico = client && (client.tipo || "Otro") === "Otro" && prod.precioPublico > 0;
   const precioBase = esPublico ? prod.precioPublico : prod.precioVentaSinIVA;
 
-  document.getElementById("precioVenta").value = precioBase;
+  document.getElementById("precioVenta").value = montoParaInput(precioBase);
   const cantInput = document.getElementById("cantidad");
   if (cantInput) cantInput.value = "";
   const info = document.getElementById("infoPrecioProducto");
@@ -1853,7 +1881,7 @@ function completarPagoTotal(orderId) {
   const order = orders.find(o => o.id === orderId);
   if (!order) return;
   const input = document.getElementById("inputMontoPago-" + orderId);
-  if (input) input.value = calcularSaldo(order);
+  if (input) input.value = montoParaInput(calcularSaldo(order));
 }
 
 function elegirMedioPago(orderId, medio) {
@@ -3426,7 +3454,7 @@ function renderOrderCard(order) {
     ${formAbierto ? `
       <div class="form-pago">
         <div class="row-2" style="margin-bottom:8px;">
-          <input id="inputMontoPago-${order.id}" type="number" placeholder="Monto recibido" />
+          <input id="inputMontoPago-${order.id}" type="text" inputmode="decimal" placeholder="Monto recibido" />
           <button class="btn-ubicacion" onclick="completarPagoTotal('${order.id}')">💯 Total (${formatCurrency(calcularSaldo(order))})</button>
         </div>
         <div class="medio-pago-tabs" style="margin-bottom:8px;">
@@ -3542,7 +3570,7 @@ function toggleFormPagoDeuda(id) {
   form.style.display = abrir ? "block" : "none";
   if (abrir) {
     const input = document.getElementById("inputMontoPagoDeuda-" + id);
-    if (input) input.value = deudaTotalCliente(id);
+    if (input) input.value = montoParaInput(deudaTotalCliente(id));
   }
 }
 
@@ -3749,7 +3777,7 @@ function renderVistaDeudores() {
               </div>
               <div id="form-pagodeuda-${c.id}" style="display:none; margin-top:8px; background:#f0fdf4; border-radius:10px; padding:10px;" onclick="event.stopPropagation()">
                 <div class="muted" style="margin-bottom:6px;">Deuda total: ${formatCurrency(c.deuda)}</div>
-                <input type="number" id="inputMontoPagoDeuda-${c.id}" placeholder="Monto pagado" value="${c.deuda}" style="margin-bottom:6px;" />
+                <input type="text" inputmode="decimal" id="inputMontoPagoDeuda-${c.id}" placeholder="Monto pagado" value="${montoParaInput(c.deuda)}" style="margin-bottom:6px;" />
                 <input type="hidden" id="medioPagoDeuda-${c.id}" value="Efectivo" />
                 <div class="row-2" style="margin-bottom:8px;">
                   <button type="button" id="medioEfectivoDeuda-${c.id}" class="medio-pago-tab active" onclick="elegirMedioPagoDeuda('${c.id}','Efectivo')">💵 Efectivo</button>
@@ -3949,7 +3977,7 @@ function renderVistaResumen() {
           <div class="row-2">
             <div class="form-group" style="margin:0;">
               <label>🎯 Meta de ventas de ${mesResumenCapital}</label>
-              <input id="inputMetaMes" type="number" min="0" placeholder="Ej: 500000" value="${meta || ""}" onchange="guardarMetaMes()" />
+              <input id="inputMetaMes" type="text" inputmode="decimal" min="0" placeholder="Ej: 500000" value="${meta || ""}" onchange="guardarMetaMes()" />
             </div>
           </div>
           ${meta > 0 ? `
@@ -4095,7 +4123,7 @@ function renderVistaResumen() {
         <div class="row-2" style="margin-top:14px;">
           <div class="form-group">
             <label>Monto en nafta</label>
-            <input id="vehiculoMonto" type="number" min="0" placeholder="Ej: 15000" />
+            <input id="vehiculoMonto" type="text" inputmode="decimal" min="0" placeholder="Ej: 15000" />
           </div>
           <div class="form-group">
             <label>Litros cargados</label>
@@ -4150,7 +4178,7 @@ function renderVistaResumen() {
           <div class="row-2">
             <div class="form-group">
               <label>Monto</label>
-              <input id="extraMonto" type="number" min="0" placeholder="Ej: 25000" />
+              <input id="extraMonto" type="text" inputmode="decimal" min="0" placeholder="Ej: 25000" />
             </div>
             <div class="form-group">
               <label>Fecha</label>
@@ -4210,23 +4238,23 @@ function renderVistaResumen() {
 
           <h4 style="margin-top:16px; margin-bottom:8px;">Editar valores</h4>
           <div class="row-2">
-            <div class="form-group"><label>Seguro mensual</label><input id="cfgSeguro" type="number" value="${cv.seguro}" /></div>
-            <div class="form-group"><label>Celular mensual</label><input id="cfgCelular" type="number" value="${cv.celular}" /></div>
+            <div class="form-group"><label>Seguro mensual</label><input id="cfgSeguro" type="text" inputmode="decimal" value="${cv.seguro}" /></div>
+            <div class="form-group"><label>Celular mensual</label><input id="cfgCelular" type="text" inputmode="decimal" value="${cv.celular}" /></div>
           </div>
         <div class="row-2">
-  <div class="form-group"><label>Monotributo mensual</label><input id="cfgMonotributo" type="number" value="${cv.monotributo || 0}" /></div>
+  <div class="form-group"><label>Monotributo mensual</label><input id="cfgMonotributo" type="text" inputmode="decimal" value="${cv.monotributo || 0}" /></div>
   <div></div>
 </div>
           <div class="row-2">
-            <div class="form-group"><label>Costo del service</label><input id="cfgServicioCosto" type="number" value="${cv.servicioCosto}" /></div>
+            <div class="form-group"><label>Costo del service</label><input id="cfgServicioCosto" type="text" inputmode="decimal" value="${cv.servicioCosto}" /></div>
             <div class="form-group"><label>Cada cuántos km</label><input id="cfgServicioKm" type="number" value="${cv.servicioKm}" /></div>
           </div>
           <div class="row-2">
-            <div class="form-group"><label>Costo cubiertas</label><input id="cfgCubiertasCosto" type="number" value="${cv.cubiertasCosto}" /></div>
+            <div class="form-group"><label>Costo cubiertas</label><input id="cfgCubiertasCosto" type="text" inputmode="decimal" value="${cv.cubiertasCosto}" /></div>
             <div class="form-group"><label>Duran cuántos km</label><input id="cfgCubiertasKm" type="number" value="${cv.cubiertasKm}" /></div>
           </div>
           <div class="row-2">
-            <div class="form-group"><label>Costo batería</label><input id="cfgBateriaCosto" type="number" value="${cv.bateriaCosto}" /></div>
+            <div class="form-group"><label>Costo batería</label><input id="cfgBateriaCosto" type="text" inputmode="decimal" value="${cv.bateriaCosto}" /></div>
             <div class="form-group"><label>Duración (años)</label><input id="cfgBateriaAnios" type="number" value="${cv.bateriaAnios}" /></div>
           </div>
           <button class="btn-primary btn-full" onclick="guardarConfigVehiculo()">💾 Guardar valores</button>
@@ -4670,7 +4698,7 @@ function renderVistaStock() {
       <div class="row-2">
         <div class="form-group" style="margin:0;">
           <label>Precio de venta (s/IVA)</label>
-          <input id="nuevoProductoPrecio" type="number" placeholder="Ej: 5000" />
+          <input id="nuevoProductoPrecio" type="text" inputmode="decimal" placeholder="Ej: 5000" />
         </div>
         <div class="form-group" style="margin:0;">
           <label>Código (opcional)</label>
@@ -4679,12 +4707,12 @@ function renderVistaStock() {
       </div>
       <div class="form-group">
         <label>Precio público (s/IVA, opcional)</label>
-        <input id="nuevoProductoPrecioPublico" type="number" placeholder="Para clientes tipo Otro" />
+        <input id="nuevoProductoPrecioPublico" type="text" inputmode="decimal" placeholder="Para clientes tipo Otro" />
       </div>
       <div class="row-2">
         <div class="form-group" style="margin:0;">
           <label>Costo (opcional)</label>
-          <input id="nuevoProductoCosto" type="number" placeholder="Costo de compra" oninput="document.getElementById('nuevoProductoComision').value=''" />
+          <input id="nuevoProductoCosto" type="text" inputmode="decimal" placeholder="Costo de compra" oninput="document.getElementById('nuevoProductoComision').value=''" />
         </div>
         <div class="form-group" style="margin:0;">
           <label>o % Comisión</label>
@@ -4764,16 +4792,16 @@ function renderVistaStock() {
                 </div>
                 <div class="form-group" style="margin:0;">
                   <label>Precio de venta (s/IVA)</label>
-                  <input id="input-precio-${p.id}" type="number" placeholder="Precio de venta" value="${p.precioVentaSinIVA}" />
+                  <input id="input-precio-${p.id}" type="text" inputmode="decimal" placeholder="Precio de venta" value="${montoParaInput(p.precioVentaSinIVA)}" />
                 </div>
               </div>
               <div class="form-group" style="margin:8px 0 0;">
                 <label>Precio público (s/IVA, para clientes Otro)</label>
-                <input id="input-preciopublico-${p.id}" type="number" placeholder="Sin cargar" value="${p.precioPublico > 0 ? p.precioPublico : ''}" />
+                <input id="input-preciopublico-${p.id}" type="text" inputmode="decimal" placeholder="Sin cargar" value="${p.precioPublico > 0 ? p.precioPublico : ''}" />
               </div>
               <div class="form-group" style="margin:8px 0 0;">
                 <label>Costo (lo que pagás vos, o le corresponde al proveedor)</label>
-                <input id="input-costo-${p.id}" type="number" placeholder="Costo de compra" value="${costoActual || ""}" />
+                <input id="input-costo-${p.id}" type="text" inputmode="decimal" placeholder="Costo de compra" value="${costoActual || ""}" />
               </div>
               <div class="form-group" style="margin:8px 0 0;">
                 <label>¿O trabajás a comisión? Poné tu % y te calculo el costo solo</label>
@@ -4836,7 +4864,7 @@ function renderVistaStock() {
         <h3 class="section-title">💵 Inversión en ${filtroStock}</h3>
         <div class="form-group">
           <label>Monto invertido</label>
-          <input id="inversionMonto" type="number" min="0" placeholder="Ej: 50000" />
+          <input id="inversionMonto" type="text" inputmode="decimal" min="0" placeholder="Ej: 50000" />
         </div>
         <div class="form-group">
           <label>Fecha</label>
