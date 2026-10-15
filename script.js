@@ -246,6 +246,12 @@ function guardarEnDriveConVerificacion(onProgreso) {
   return guardadoEnCurso;
 }
 
+// Huella de una lista: sirve para saber si lo que hay en el dispositivo es
+// exactamente igual a lo que ya está en Google (sin importar el orden).
+function huellaLista(arr) {
+  return (arr || []).map(x => JSON.stringify(x)).sort().join("\n");
+}
+
 async function guardarEnDriveUnaVez(onProgreso) {
   // Si hay una sincronización (lectura) en curso, esperamos a que termine,
   // pero como mucho 45 segundos: nunca nos quedamos trabados para siempre.
@@ -256,54 +262,55 @@ async function guardarEnDriveUnaVez(onProgreso) {
 
   syncEnCurso = true;
   try {
-    // Antes de guardar: traemos lo último de Drive y lo fusionamos con lo
-    // local. El backend de Apps Script REEMPLAZA toda la hoja con lo que se
-    // le manda — no fusiona solo. Si no hacemos este paso, un guardado desde
-    // un dispositivo con datos un poco viejos puede borrar cambios más
-    // nuevos hechos en otro dispositivo (ej: un pago confirmado en el celu).
+    const TIPOS = ["clientes", "catalogo", "pedidos", "inversiones"];
+    const getLocal = t => t === "clientes" ? clients : t === "catalogo" ? catalog : t === "pedidos" ? orders : inversiones;
+
+    // 1) Traemos lo último de Google y lo fusionamos con lo local. El Apps
+    //    Script REEMPLAZA toda la hoja con lo que se le manda, así que sin
+    //    este paso un dispositivo con datos viejos podría pisar cambios
+    //    hechos en otro (ej: un pago confirmado en el celu).
+    //    De paso nos quedamos con la "huella" de lo que tiene Google, para
+    //    después subir SOLO lo que cambió.
+    let huellaDrive = null;
     try {
-      const [rC0, rCat0, rP0, rI0] = await Promise.all([
-        fetchConTimeout(API_URL + "?tipo=clientes"),
-        fetchConTimeout(API_URL + "?tipo=catalogo"),
-        fetchConTimeout(API_URL + "?tipo=pedidos"),
-        fetchConTimeout(API_URL + "?tipo=inversiones")
-      ]);
-      const [dC0, dCat0, dP0, dI0] = await Promise.all([rC0.json(), rCat0.json(), rP0.json(), rI0.json()]);
-      if (dC0.length > 0)   clients = fusionarPorId(clients, dC0.map(r => JSON.parse(r[0])));
-      if (dCat0.length > 0) catalog = fusionarCatalogoPorNombre(catalog, dCat0.map(r => JSON.parse(r[0])));
-      if (dP0.length > 0)   orders  = fusionarPorId(orders, dP0.map(r => JSON.parse(r[0])));
-      if (dI0.length > 0)   inversiones = fusionarPorId(inversiones, dI0.map(r => JSON.parse(r[0])));
+      const resp = await Promise.all(TIPOS.map(t => fetchConTimeout(API_URL + "?tipo=" + t, null, 60000)));
+      const datos = await Promise.all(resp.map(r => r.json()));
+      const [dC0, dCat0, dP0, dI0] = datos.map(d => d.map(r => JSON.parse(r[0])));
+      if (dC0.length > 0)   clients = fusionarPorId(clients, dC0);
+      if (dCat0.length > 0) catalog = fusionarCatalogoPorNombre(catalog, dCat0);
+      if (dP0.length > 0)   orders  = fusionarPorId(orders, dP0);
+      if (dI0.length > 0)   inversiones = fusionarPorId(inversiones, dI0);
       guardarLocal();
+      huellaDrive = { clientes: huellaLista(dC0), catalogo: huellaLista(dCat0), pedidos: huellaLista(dP0), inversiones: huellaLista(dI0) };
     } catch (e) {
-      console.log("No se pudo repasar con Drive antes de guardar, sigue con lo local:", e);
+      console.log("No se pudo repasar con Google antes de guardar, se sube todo:", e);
     }
 
-    const maxIntentos = 2;
+    // 2) ¿Qué hay que subir? Solo las listas que quedaron distintas a lo que
+    //    ya tiene Google. Si no pudimos leer Google, subimos todo.
+    //    (Una lista vacía no se sube: el Apps Script la ignora a propósito.)
+    const aSubir = TIPOS.filter(t => {
+      const local = getLocal(t);
+      if (!local || local.length === 0) return false;
+      return !huellaDrive || huellaDrive[t] !== huellaLista(local);
+    });
+    if (aSubir.length === 0) return true; // Google ya tiene todo igual
 
+    const maxIntentos = 2;
     for (let intento = 1; intento <= maxIntentos; intento++) {
       if (onProgreso) onProgreso(intento, maxIntentos);
-
       try {
-        await Promise.all([
-          fetchConTimeout(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "clientes", payload: clients }) }),
-          fetchConTimeout(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "catalogo", payload: catalog }) }),
-          fetchConTimeout(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "pedidos",  payload: orders  }) }),
-          fetchConTimeout(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "inversiones", payload: inversiones }) })
-        ]);
+        // Subir una hoja grande (los pedidos) puede tardar: le damos hasta 2 minutos.
+        await Promise.all(aSubir.map(t =>
+          fetchConTimeout(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: t, payload: getLocal(t) }) }, 120000)
+        ));
 
-        await new Promise(r => setTimeout(r, intento === 1 ? 500 : 1500 * intento)); // el envío ya esperó la respuesta de Google; el margen extra es solo para reintentos
+        await new Promise(r => setTimeout(r, intento === 1 ? 500 : 1500 * intento));
 
-        const [rC, rCat, rP, rI] = await Promise.all([
-          fetchConTimeout(API_URL + "?tipo=clientes"),
-          fetchConTimeout(API_URL + "?tipo=catalogo"),
-          fetchConTimeout(API_URL + "?tipo=pedidos"),
-          fetchConTimeout(API_URL + "?tipo=inversiones")
-        ]);
-        const [dC, dCat, dP, dI] = await Promise.all([rC.json(), rCat.json(), rP.json(), rI.json()]);
-
-        if (dC.length >= clients.length && dCat.length >= catalog.length && dP.length >= orders.length && dI.length >= inversiones.length) {
-          return true;
-        }
+        // 3) Verificamos solo lo que subimos.
+        const resp = await Promise.all(aSubir.map(t => fetchConTimeout(API_URL + "?tipo=" + t, null, 60000)));
+        const datos = await Promise.all(resp.map(r => r.json()));
+        if (aSubir.every((t, i) => datos[i].length >= getLocal(t).length)) return true;
       } catch (e) {
         console.log(`Intento ${intento} de guardado falló:`, e);
       }
@@ -314,14 +321,24 @@ async function guardarEnDriveUnaVez(onProgreso) {
   }
 }
 
+// Aviso de guardado fallido: una barrita arriba que se va sola, en vez de un
+// cartel que te frena la pantalla y tenés que cerrar con "Aceptar".
 let ultimoAvisoGuardadoFallido = 0;
+function avisarGuardadoFallido() {
+  if (Date.now() - ultimoAvisoGuardadoFallido < 60000) return;
+  ultimoAvisoGuardadoFallido = Date.now();
+  const bar = document.getElementById("offline-bar");
+  if (!bar) return;
+  bar.textContent = "⚠️ No se pudo guardar en Google ahora. Está guardado en este dispositivo — tocá ☁️ Guardar más tarde.";
+  bar.classList.remove("offline-bar-ok");
+  bar.classList.add("offline-bar-visible");
+  setTimeout(() => { if (navigator.onLine) bar.classList.remove("offline-bar-visible"); }, 6000);
+}
+
 async function guardarStorage() {
   guardarLocal();
   const ok = await guardarEnDriveConVerificacion();
-  if (!ok && Date.now() - ultimoAvisoGuardadoFallido > 60000) {
-    ultimoAvisoGuardadoFallido = Date.now();
-    alert("⚠️ No se pudo confirmar el guardado en Google Drive después de varios intentos. No perdiste nada — está guardado en este dispositivo. Tocá '☁️ Guardar ahora' más tarde con buena conexión.");
-  }
+  if (!ok) avisarGuardadoFallido();
 }
 
 async function forzarRecargaDrive() {
@@ -355,7 +372,7 @@ async function forzarRecargaDrive() {
 
     if (btn) { btn.textContent = "✅ Actualizado!"; btn.style.background = "#059669"; }
     setTimeout(() => {
-      if (btn) { btn.textContent = "☁️ Guardar ahora"; btn.style.background = ""; btn.disabled = false; }
+      if (btn) { btn.textContent = "☁️ Guardar"; btn.style.background = ""; btn.disabled = false; }
       renderApp();
     }, 1500);
   } catch(e) {
@@ -424,7 +441,7 @@ async function guardarAhora() {
   }
 
   setTimeout(() => {
-    if (btn) { btn.textContent = "☁️ Guardar ahora"; btn.style.background = ""; btn.disabled = false; }
+    if (btn) { btn.textContent = "☁️ Guardar"; btn.style.background = ""; btn.disabled = false; }
   }, 2500);
 }
 
