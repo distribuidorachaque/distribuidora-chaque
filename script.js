@@ -562,6 +562,8 @@ function setVista(vista, clienteId) {
   // volvés aparece vacío y listo para buscar otro cliente (no queda pegado
   // lo que habías buscado antes de irte a Resumen, Stock, etc.).
   if (vista !== "clientes") busquedaCliente = "";
+  // Lo mismo con el buscador de Deudores: al salir se borra.
+  if (vista !== "deudores") busquedaDeudores = "";
   vistaActual = vista;
   if (clienteId !== undefined) clienteActivoId = clienteId;
   cerrarModal();
@@ -4913,6 +4915,39 @@ function renderVistaStock() {
 }
 
 // ── Vista: BACKUP ─────────────────────────────────────────────────────────────
+// Ganancia neta de un mes: lo cobrado (ganancia) menos los costos del
+// vehículo y operación — la misma cuenta que "Ganancia neta" en Resumen.
+// Queda "final" recién cuando están cargados los km de ese mes.
+function gananciaNetaDelMes(mes, anio) {
+  const clave = `${anio}-${String(mes).padStart(2, "0")}`;
+  const ganancia = calcularGananciaCobrada((d, m, a) => m === mes && a === anio);
+  const nafta = inversiones
+    .filter(i => !i.eliminado && i.marca === "Combustible")
+    .filter(i => { const [yi, mi] = (i.fecha || "").split("-"); return parseInt(mi) === mes && parseInt(yi) === anio; })
+    .reduce((a, i) => a + i.monto, 0);
+  const km = kmPorMes[clave] || 0;
+  const costos = calcularCostosVehiculo(km, nafta, calcularGastosExtraMes(mes, anio)).costoTotalMes;
+  return { ganancia, costos, neta: ganancia - costos, final: km > 0 };
+}
+
+// Todos los meses con ventas o cobros, desde el primero hasta el actual.
+function mesesConActividad() {
+  const claves = new Set();
+  const agregar = (fecha) => {
+    const partes = (fecha || "").replace(/,.*/, "").split("/");
+    const m = parseInt(partes[1]), a = parseInt(partes[2]);
+    if (m >= 1 && m <= 12 && a > 2000) claves.add(a * 100 + m);
+  };
+  orders.forEach(o => {
+    if (o.eliminado) return;
+    if (!o.borrador) agregar(o.fecha);
+    (o.pagos || []).forEach(p => agregar(p.fecha));
+  });
+  const hoy = new Date();
+  const actual = hoy.getFullYear() * 100 + hoy.getMonth() + 1;
+  return [...claves].filter(k => k <= actual).sort((a, b) => a - b).map(k => ({ anio: Math.floor(k / 100), mes: k % 100 }));
+}
+
 function renderVistaBackup() {
   const cont = document.getElementById("vista-contenido");
   if (!cont) return;
@@ -4940,7 +4975,31 @@ function renderVistaBackup() {
         <div class="stat-box"><div class="muted">Pedidos</div><strong>${orders.length}</strong></div>
         <div class="stat-box"><div class="muted">Productos</div><strong>${catalog.length}</strong></div>
         <div class="stat-box"><div class="muted">Total ventas</div><strong style="font-size:14px;">${formatCurrency(totalVentas)}</strong></div>
+        ${(() => {
+          const hoy = new Date();
+          const mesAct = hoy.getMonth() + 1, anioAct = hoy.getFullYear();
+          const gm = gananciaNetaDelMes(mesAct, anioAct);
+          const meses = mesesConActividad();
+          const total = meses.reduce((a, x) => a + gananciaNetaDelMes(x.mes, x.anio).neta, 0);
+          const faltanKm = meses
+            .filter(x => !(x.mes === mesAct && x.anio === anioAct) && !gananciaNetaDelMes(x.mes, x.anio).final)
+            .map(x => MESES_ES[x.mes - 1] + (x.anio !== anioAct ? " " + x.anio : ""));
+          const color = v => v >= 0 ? "#059669" : "#dc2626";
+          return `
+        <div class="stat-box">
+          <div class="muted">Ganancia de ${MESES_ES[mesAct - 1]}</div>
+          <strong style="font-size:14px; color:${color(gm.neta)};">${formatCurrency(gm.neta)}</strong>
+          <div style="font-size:11px; margin-top:2px; color:${gm.final ? "#059669" : "#d97706"};">${gm.final ? "✅ Final" : "⏳ Parcial — falta cargar los km"}</div>
+        </div>
+        <div class="stat-box">
+          <div class="muted">Ganancia total</div>
+          <strong style="font-size:14px; color:${color(total)};">${formatCurrency(total)}</strong>
+          <div class="muted" style="font-size:11px; margin-top:2px;">Desde que usás la app</div>
+        </div>
+        ${faltanKm.length ? `<p class="muted" style="grid-column:1 / -1; font-size:12px; margin:2px 0 0;">⚠️ Faltan los km de: ${faltanKm.join(", ")}. Hasta que los cargues, esos meses no descuentan la nafta ni el desgaste.</p>` : ""}`;
+        })()}
       </div>
+      <p class="muted" style="font-size:12px; margin:8px 0 0;">Ganancia = lo cobrado menos los costos del vehículo y operación (igual que la ganancia neta del Resumen).</p>
     </div>
   `;
 }
