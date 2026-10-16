@@ -564,6 +564,16 @@ function setVista(vista, clienteId) {
   if (vista !== "clientes") busquedaCliente = "";
   // Lo mismo con el buscador de Deudores: al salir se borra.
   if (vista !== "deudores") busquedaDeudores = "";
+  // Si estabas editando un pedido ya confirmado y te vas a otra pantalla sin
+  // guardar (por ejemplo, tocando el menú de abajo), se hace lo mismo que con
+  // "Cancelar": el stock que se había devuelto al entrar a editar se vuelve a
+  // descontar, así no queda stock de más.
+  if (vistaActual === "pedido" && vista !== "pedido" && editingOrderId) {
+    const order = orders.find(o => o.id === editingOrderId);
+    if (order && !order.borrador) aplicarStock(order.items, -1);
+    currentItems   = [];
+    editingOrderId = null;
+  }
   vistaActual = vista;
   if (clienteId !== undefined) clienteActivoId = clienteId;
   cerrarModal();
@@ -1341,7 +1351,8 @@ function guardarCambiosPedido() {
     ...orders[idx], client, items: [...currentItems],
     notas: document.getElementById("notasPedido").value.trim(),
     modoPrecio: document.getElementById("modoPrecio").value,
-    totals: { totalSinIVA: tSin, totalConIVA: tCon, totalCantidad: tCant }
+    totals: { totalSinIVA: tSin, totalConIVA: tCon, totalCantidad: tCant },
+    actualizadoEn: Date.now()
   };
 
   guardarStorage();
@@ -1423,6 +1434,7 @@ function confirmarEntrega(orderId) {
   }
   aplicarStock(order.items, -1);
   order.borrador = false;
+  order.actualizadoEn = Date.now();
   promoverPotencial(order.client.id);
   guardarStorage();
   renderVistaHistorial();
@@ -2375,7 +2387,7 @@ function fijarStock() {
 
 // ── Backup ────────────────────────────────────────────────────────────────────
 function exportarDatos() {
-  const blob = new Blob([JSON.stringify({ fecha: new Date().toISOString(), clients, catalog, orders }, null, 2)], { type: "application/json" });
+  const blob = new Blob([JSON.stringify({ fecha: new Date().toISOString(), clients, catalog, orders, inversiones, configVehiculo }, null, 2)], { type: "application/json" });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement("a");
   a.href = url; a.download = "backup-pedidos-distribuidora-chaque.json"; a.click();
@@ -2397,6 +2409,35 @@ function importarDatos(event) {
       clients = fusionarPorId(clients, bk.clients);
       catalog = fusionarCatalogoPorNombre(catalog, bk.catalog);
       orders  = fusionarPorId(orders, bk.orders);
+      // Los backups nuevos traen también inversiones/gastos y la config del
+      // vehículo (km y metas por mes). Los backups viejos no las tienen: en
+      // ese caso no se toca nada de eso.
+      if (Array.isArray(bk.inversiones)) inversiones = fusionarPorId(inversiones, bk.inversiones);
+      if (bk.configVehiculo && typeof bk.configVehiculo === "object") {
+        const cfgBk = bk.configVehiculo;
+        // Km y metas: se recuperan los meses que hoy no tenés cargados, sin
+        // pisar los que ya tenés.
+        let cambio = false;
+        ["kmPorMes", "metaPorMes"].forEach(campo => {
+          Object.keys(cfgBk[campo] || {}).forEach(mes => {
+            if (configVehiculo[campo][mes] === undefined) { configVehiculo[campo][mes] = cfgBk[campo][mes]; cambio = true; }
+          });
+        });
+        // Los costos fijos (seguro, celular, etc.) solo se toman del backup
+        // si son más nuevos que los que tenés ahora.
+        if ((cfgBk.actualizadoEn || 0) > (configVehiculo.actualizadoEn || 0)) {
+          const { kmPorMes: _k, metaPorMes: _m, ...costos } = cfgBk;
+          Object.assign(configVehiculo, costos);
+          cambio = true;
+        }
+        if (cambio) {
+          configVehiculo.actualizadoEn = Date.now();
+          kmPorMes = configVehiculo.kmPorMes;
+          metaPorMes = configVehiculo.metaPorMes;
+          localStorage.setItem("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
+          fetchConTimeout(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "vehiculo", payload: [configVehiculo] }) });
+        }
+      }
       guardarStorage();
       setVista("clientes");
       alert("Backup combinado con tus datos actuales — no se borró nada de lo que ya tenías.");
