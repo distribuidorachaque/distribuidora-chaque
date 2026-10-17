@@ -213,10 +213,91 @@ let syncEnCurso = false;
 // Si no coincide, reintenta hasta 3 veces antes de avisar que falló.
 // Toda llamada a Google tiene un tiempo máximo: si Google se cuelga, cortamos
 // y seguimos, en vez de dejar la app "Guardando..." varios minutos.
-function fetchConTimeout(url, opciones, ms) {
+// Clave de Google: el Apps Script solo acepta pedidos que traigan la clave.
+// La clave NO está escrita en este código (que es público): se carga una vez
+// en cada dispositivo (en Backup) y queda guardada solo ahí.
+function leerClaveGoogle() {
+  try { return localStorage.getItem("alunexa_clave_google_v1") || ""; } catch { return ""; }
+}
+
+let ultimoAvisoClave = 0;
+function avisarClaveIncorrecta() {
+  if (Date.now() - ultimoAvisoClave < 60000) return;
+  ultimoAvisoClave = Date.now();
+  const bar = document.getElementById("offline-bar");
+  if (!bar) return;
+  bar.textContent = leerClaveGoogle()
+    ? "🔑 Google rechazó la clave. Revisala en 💾 Backup → Clave de Google."
+    : "🔑 Falta cargar la clave de Google en este dispositivo: 💾 Backup → Clave de Google.";
+  bar.classList.remove("offline-bar-ok");
+  bar.classList.add("offline-bar-visible");
+  setTimeout(() => { if (navigator.onLine) bar.classList.remove("offline-bar-visible"); }, 8000);
+}
+
+async function fetchConTimeout(url, opciones, ms) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), ms || 30000);
-  return fetch(url, { ...(opciones || {}), signal: ctrl.signal }).finally(() => clearTimeout(t));
+  let op = { ...(opciones || {}), signal: ctrl.signal };
+  const esGoogle = typeof url === "string" && url.startsWith(API_URL);
+  if (esGoogle) {
+    const clave = leerClaveGoogle();
+    if (op.method === "POST" && typeof op.body === "string") {
+      try { op.body = JSON.stringify({ ...JSON.parse(op.body), clave }); } catch {}
+    } else {
+      url += (url.includes("?") ? "&" : "?") + "clave=" + encodeURIComponent(clave);
+    }
+  }
+  try {
+    const resp = await fetch(url, op);
+    // Si Google contesta que la clave está mal, se corta acá como un error
+    // (igual que si no hubiera internet): no se toca ningún dato.
+    if (esGoogle && op.method !== "POST") {
+      let datos = null;
+      try { datos = await resp.clone().json(); } catch {}
+      if (datos && !Array.isArray(datos) && datos.error === "clave") {
+        avisarClaveIncorrecta();
+        throw new Error("Clave de Google incorrecta");
+      }
+    }
+    return resp;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+function guardarClaveGoogle() {
+  const input = document.getElementById("claveGoogleInput");
+  const clave = (input ? input.value : "").trim();
+  if (clave.length < 8) return alert("La clave tiene que tener al menos 8 caracteres.");
+  localStorage.setItem("alunexa_clave_google_v1", clave);
+  ultimoAvisoClave = 0;
+  alert("✅ Clave guardada en este dispositivo.");
+  renderVistaBackup();
+  forzarRecargaDrive();
+}
+
+function cambiarClaveGoogle() {
+  localStorage.removeItem("alunexa_clave_google_v1");
+  renderVistaBackup();
+}
+
+function renderCardClaveGoogle() {
+  const clave = leerClaveGoogle();
+  if (clave) {
+    return `
+    <div class="form-card">
+      <h3 class="section-title">🔑 Clave de Google</h3>
+      <p class="muted" style="margin:0 0 10px;">✅ Cargada en este dispositivo (termina en "${clave.slice(-2).replace(/[<>&"']/g, "")}").</p>
+      <button class="btn-gray btn-full" onclick="cambiarClaveGoogle()">✏️ Cambiar clave</button>
+    </div>`;
+  }
+  return `
+    <div class="form-card" style="border-left:4px solid #f59e0b;">
+      <h3 class="section-title">🔑 Clave de Google</h3>
+      <p class="muted" style="margin:0 0 10px;">Es la clave que protege tus datos en Google. Tiene que ser la misma en todos tus dispositivos y la misma que pusiste en el Apps Script.</p>
+      <input id="claveGoogleInput" type="password" autocomplete="off" placeholder="Escribí la clave" style="width:100%; box-sizing:border-box; border:1.5px solid #d1d5db; border-radius:8px; padding:10px; font-size:15px; margin-bottom:8px;" />
+      <button class="btn-primary btn-full" onclick="guardarClaveGoogle()">💾 Guardar clave</button>
+    </div>`;
 }
 
 // Un solo guardado a la vez. Si mientras se guarda llegan más pedidos de
@@ -5185,6 +5266,8 @@ function renderVistaBackup() {
       </div>
       <input id="importBackupInput" type="file" accept=".json" style="display:none;" onchange="importarDatos(event)" />
     </div>
+
+    ${renderCardClaveGoogle()}
 
     ${renderCardBloqueo()}
 
