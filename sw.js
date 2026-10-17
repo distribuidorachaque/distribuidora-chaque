@@ -11,5 +11,14 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
-  event.respondWith(fetch(event.request));
+  const req = event.request;
+  // Los archivos de la app (index.html, script.js, style.css, etc.) se piden
+  // siempre frescos a GitHub: "no-store" hace que el navegador tampoco use su
+  // copia guardada de hasta 10 minutos. Lo de afuera (Google, librerías) va
+  // como siempre.
+  if (req.method === "GET" && new URL(req.url).origin === self.location.origin) {
+    event.respondWith(fetch(req, { cache: "no-store" }));
+  } else {
+    event.respondWith(fetch(req));
+  }
 });
