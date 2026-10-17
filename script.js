@@ -3939,6 +3939,19 @@ function guardarConfigMonotributo() {
   renderVistaResumen();
 }
 
+// Borra la fecha de alta: el control queda apagado (como si nunca se hubiera
+// cargado). La categoría y el tope quedan guardados para la próxima vez.
+function desactivarMonotributo() {
+  if (!confirm("¿Borrás la fecha de alta? El control del monotributo se apaga hasta que cargues una fecha nueva.")) return;
+  configVehiculo = { ...configVehiculo, monoAlta: "", actualizadoEn: Date.now() };
+  localStorage.setItem("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
+  fetchConTimeout(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "vehiculo", payload: [configVehiculo] }) });
+  kmPorMes = configVehiculo.kmPorMes;
+  metaPorMes = configVehiculo.metaPorMes;
+  monotributoConfigAbierto = false;
+  renderVistaResumen();
+}
+
 function renderCardMonotributo(mesSel, anioSel, mesNombre) {
   const alta = fechaAltaMonotributo();
   const tope = configVehiculo.monoTope || 0;
@@ -3955,6 +3968,7 @@ function renderCardMonotributo(mesSel, anioSel, mesNombre) {
       <label class="muted" style="font-size:13px;">Tope anual de facturación de tu categoría ($)</label>
       <input type="text" inputmode="decimal" id="monoTope" value="${tope ? montoParaInput(tope).toLocaleString("es-AR") : ""}" placeholder="Ej: 10.000.000" style="${estiloInput}" />
       <button class="btn-primary btn-full" onclick="guardarConfigMonotributo()">💾 Guardar</button>
+      ${configVehiculo.monoAlta ? `<button class="btn-gray btn-full" style="margin-top:8px;" onclick="desactivarMonotributo()">🗑️ Borrar fecha de alta (desactivar)</button>` : ""}
     </div>`;
 
   if (!alta) {
