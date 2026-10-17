@@ -5186,6 +5186,8 @@ function renderVistaBackup() {
       <input id="importBackupInput" type="file" accept=".json" style="display:none;" onchange="importarDatos(event)" />
     </div>
 
+    ${renderCardBloqueo()}
+
     <div class="form-card">
       <h3 class="section-title">Resumen</h3>
       <div class="stats-grid">
@@ -5556,6 +5558,249 @@ function initOfflineIndicator() {
   actualizarEstado();
 }
 
+// ── Bloqueo con huella / PIN ──────────────────────────────────────────────
+// Se activa desde Backup y vale solo para ESTE dispositivo (no viaja a
+// Google). La huella usa el sistema del propio celular (WebAuthn): la app
+// nunca ve la huella, solo le pregunta al teléfono "¿es el dueño?". El PIN
+// es de repuesto y se guarda como huella digital (hash), nunca el número.
+// Se pide al abrir la app, o al volver a ella después de más de 5 minutos
+// fuera.
+const BLOQUEO_KEY = "alunexa_bloqueo_v1";
+const BLOQUEO_ULTIMO_KEY = "alunexa_bloqueo_ultimo_v1";
+const BLOQUEO_MINUTOS = 5;
+let appBloqueada = false;
+let pinIntentosFallidos = 0;
+let pinEsperaHasta = 0;
+
+function leerConfigBloqueo() {
+  try { return JSON.parse(localStorage.getItem(BLOQUEO_KEY) || "null"); } catch { return null; }
+}
+function guardarConfigBloqueo(cfg) {
+  if (cfg) localStorage.setItem(BLOQUEO_KEY, JSON.stringify(cfg));
+  else localStorage.removeItem(BLOQUEO_KEY);
+}
+
+function bytesABase64(buf) {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+}
+function base64ABytes(b64) {
+  return Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+}
+async function hashPin(pin, salt) {
+  const datos = new TextEncoder().encode(salt + ":" + pin);
+  return bytesABase64(await crypto.subtle.digest("SHA-256", datos));
+}
+
+async function huellaDisponible() {
+  try {
+    return !!(window.PublicKeyCredential && navigator.credentials &&
+      await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable());
+  } catch { return false; }
+}
+
+async function registrarHuella() {
+  const cfg = leerConfigBloqueo();
+  if (!cfg) return;
+  if (!(await huellaDisponible())) return alert("Este dispositivo no tiene huella disponible para la app. Vas a entrar con el PIN.");
+  try {
+    const cred = await navigator.credentials.create({ publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      rp: { name: "Distribuidora Chaque" },
+      user: { id: crypto.getRandomValues(new Uint8Array(16)), name: "Distribuidora Chaque", displayName: "Distribuidora Chaque" },
+      pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
+      authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required", residentKey: "discouraged" },
+      timeout: 60000
+    }});
+    cfg.credId = bytesABase64(cred.rawId);
+    guardarConfigBloqueo(cfg);
+    alert("✅ Huella registrada. La próxima vez que abras la app te la va a pedir.");
+  } catch (e) {
+    console.log("No se pudo registrar la huella:", e);
+    alert("No se pudo registrar la huella. Podés probar de nuevo más tarde; mientras tanto entrás con el PIN.");
+  }
+  if (vistaActual === "backup") renderVistaBackup();
+}
+
+async function activarBloqueo() {
+  const pin = document.getElementById("bloqueoPin").value.trim();
+  const pin2 = document.getElementById("bloqueoPin2").value.trim();
+  if (!/^\d{4,6}$/.test(pin)) return alert("El PIN tiene que tener de 4 a 6 números.");
+  if (pin !== pin2) return alert("Los dos PIN no coinciden.");
+  const salt = bytesABase64(crypto.getRandomValues(new Uint8Array(16)));
+  guardarConfigBloqueo({ activo: true, salt, pinHash: await hashPin(pin, salt), credId: null });
+  marcarUltimaActividad();
+  if (await huellaDisponible()) await registrarHuella();
+  else alert("✅ Bloqueo activado con PIN. Este dispositivo no tiene huella disponible para la app.");
+  renderVistaBackup();
+}
+
+async function pedirPinActual(mensaje) {
+  const cfg = leerConfigBloqueo();
+  const pin = prompt(mensaje);
+  if (pin === null) return false;
+  if ((await hashPin(pin.trim(), cfg.salt)) !== cfg.pinHash) { alert("PIN incorrecto."); return false; }
+  return true;
+}
+
+async function desactivarBloqueo() {
+  if (!(await pedirPinActual("Para desactivar el bloqueo, escribí tu PIN:"))) return;
+  guardarConfigBloqueo(null);
+  alert("Bloqueo desactivado en este dispositivo.");
+  renderVistaBackup();
+}
+
+async function cambiarPinBloqueo() {
+  if (!(await pedirPinActual("Escribí tu PIN actual:"))) return;
+  const nuevo = prompt("PIN nuevo (de 4 a 6 números):");
+  if (nuevo === null) return;
+  if (!/^\d{4,6}$/.test(nuevo.trim())) return alert("El PIN tiene que tener de 4 a 6 números.");
+  const cfg = leerConfigBloqueo();
+  cfg.salt = bytesABase64(crypto.getRandomValues(new Uint8Array(16)));
+  cfg.pinHash = await hashPin(nuevo.trim(), cfg.salt);
+  guardarConfigBloqueo(cfg);
+  alert("✅ PIN cambiado.");
+}
+
+function marcarUltimaActividad() {
+  try { localStorage.setItem(BLOQUEO_ULTIMO_KEY, String(Date.now())); } catch {}
+}
+
+function debeBloquear() {
+  const cfg = leerConfigBloqueo();
+  if (!cfg || !cfg.activo) return false;
+  const ultimo = Number(localStorage.getItem(BLOQUEO_ULTIMO_KEY) || 0);
+  return Date.now() - ultimo > BLOQUEO_MINUTOS * 60000;
+}
+
+function mostrarPantallaBloqueo() {
+  const cfg = leerConfigBloqueo();
+  appBloqueada = true;
+  const app = document.getElementById("app");
+  if (app) app.style.visibility = "hidden";
+  let pant = document.getElementById("pantallaBloqueo");
+  if (!pant) {
+    pant = document.createElement("div");
+    pant.id = "pantallaBloqueo";
+    document.body.appendChild(pant);
+  }
+  pant.style.cssText = "position:fixed; inset:0; z-index:99999; background:#f3f4f6; display:flex; align-items:center; justify-content:center; padding:16px; box-sizing:border-box;";
+  pant.innerHTML = `
+    <div style="background:#fff; border-radius:16px; padding:28px 20px; width:100%; max-width:340px; text-align:center; box-shadow:0 4px 20px rgba(0,0,0,0.08);">
+      <div style="font-size:44px;">🔒</div>
+      <h2 style="margin:8px 0 4px; font-size:20px;">Distribuidora Chaque</h2>
+      <p style="margin:0 0 18px; color:#6b7280; font-size:14px;">La app está bloqueada</p>
+      ${cfg.credId ? `<button onclick="desbloquearConHuella()" style="width:100%; padding:14px; font-size:16px; border:none; border-radius:10px; background:#2563eb; color:#fff; margin-bottom:14px;">👆 Entrar con huella</button>` : ""}
+      <input id="bloqueoPinEntrada" type="password" inputmode="numeric" maxlength="6" placeholder="PIN" autocomplete="off"
+        onkeydown="if(event.key==='Enter') desbloquearConPin()"
+        style="width:100%; box-sizing:border-box; padding:12px; font-size:20px; letter-spacing:6px; text-align:center; border:1.5px solid #d1d5db; border-radius:10px; margin-bottom:8px;" />
+      <button onclick="desbloquearConPin()" style="width:100%; padding:12px; font-size:15px; border:1.5px solid #2563eb; border-radius:10px; background:#fff; color:#2563eb;">Entrar con PIN</button>
+      <p id="bloqueoMensaje" style="margin:10px 0 0; color:#dc2626; font-size:13px; min-height:18px;"></p>
+    </div>`;
+  // Al aparecer, intenta la huella sola. Algunos celulares (iPhone) solo la
+  // permiten después de tocar un botón: si este intento automático falla, no
+  // se muestra error, queda el botón "Entrar con huella".
+  if (cfg.credId) setTimeout(() => desbloquearConHuella(true), 300);
+}
+
+function desbloquear() {
+  appBloqueada = false;
+  pinIntentosFallidos = 0;
+  marcarUltimaActividad();
+  const pant = document.getElementById("pantallaBloqueo");
+  if (pant) pant.remove();
+  const app = document.getElementById("app");
+  if (app) app.style.visibility = "";
+}
+
+let huellaEnCurso = false;
+async function desbloquearConHuella(automatico) {
+  const cfg = leerConfigBloqueo();
+  if (!cfg || !cfg.credId || huellaEnCurso) return;
+  huellaEnCurso = true;
+  try {
+    const resp = await navigator.credentials.get({ publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      allowCredentials: [{ type: "public-key", id: base64ABytes(cfg.credId) }],
+      userVerification: "required",
+      timeout: 60000
+    }});
+    // Byte 32 del authenticatorData: el bit 0x04 confirma que el teléfono
+    // verificó al dueño (huella / cara / bloqueo de pantalla).
+    const flags = new Uint8Array(resp.response.authenticatorData)[32];
+    if (flags & 0x04) desbloquear();
+    else throw new Error("sin verificación del usuario");
+  } catch (e) {
+    console.log("Huella no verificada:", e);
+    const msg = document.getElementById("bloqueoMensaje");
+    if (msg && automatico !== true) msg.textContent = "No se pudo leer la huella. Tocá el botón para probar de nuevo o usá el PIN.";
+  } finally {
+    huellaEnCurso = false;
+  }
+}
+
+async function desbloquearConPin() {
+  const cfg = leerConfigBloqueo();
+  const input = document.getElementById("bloqueoPinEntrada");
+  const msg = document.getElementById("bloqueoMensaje");
+  if (!cfg || !input) return;
+  if (Date.now() < pinEsperaHasta) {
+    if (msg) msg.textContent = `Demasiados intentos. Esperá ${Math.ceil((pinEsperaHasta - Date.now()) / 1000)} segundos.`;
+    return;
+  }
+  if ((await hashPin(input.value.trim(), cfg.salt)) === cfg.pinHash) return desbloquear();
+  pinIntentosFallidos++;
+  input.value = "";
+  if (pinIntentosFallidos >= 5) {
+    pinEsperaHasta = Date.now() + 30000;
+    pinIntentosFallidos = 0;
+    if (msg) msg.textContent = "Demasiados intentos. Esperá 30 segundos.";
+  } else if (msg) msg.textContent = "PIN incorrecto.";
+}
+
+function renderCardBloqueo() {
+  const cfg = leerConfigBloqueo();
+  const estiloInput = "width:100%; box-sizing:border-box; border:1.5px solid #d1d5db; border-radius:8px; padding:10px; font-size:18px; letter-spacing:4px; text-align:center; margin-bottom:8px;";
+  if (!cfg || !cfg.activo) {
+    return `
+    <div class="form-card">
+      <h3 class="section-title">🔒 Bloquear la app</h3>
+      <p class="muted" style="margin:0 0 10px;">Pide tu huella (o un PIN) para abrir la app, o al volver después de más de ${BLOQUEO_MINUTOS} minutos. Vale solo para este dispositivo.</p>
+      <input id="bloqueoPin" type="password" inputmode="numeric" maxlength="6" placeholder="PIN de repuesto (4 a 6 números)" autocomplete="new-password" style="${estiloInput}" />
+      <input id="bloqueoPin2" type="password" inputmode="numeric" maxlength="6" placeholder="Repetí el PIN" autocomplete="new-password" style="${estiloInput}" />
+      <button class="btn-primary btn-full" onclick="activarBloqueo()">🔒 Activar bloqueo</button>
+    </div>`;
+  }
+  return `
+    <div class="form-card">
+      <h3 class="section-title">🔒 Bloqueo activado</h3>
+      <p class="muted" style="margin:0 0 10px;">${cfg.credId ? "👆 Con huella y PIN de repuesto." : "Solo con PIN (sin huella registrada)."} Se pide al abrir la app o al volver después de más de ${BLOQUEO_MINUTOS} minutos.</p>
+      <div class="actions-col">
+        ${cfg.credId ? "" : `<button class="btn-primary btn-full" onclick="registrarHuella()">👆 Registrar huella</button>`}
+        <button class="btn-secondary btn-full" onclick="cambiarPinBloqueo()">🔑 Cambiar PIN</button>
+        <button class="btn-gray btn-full" onclick="desactivarBloqueo()">🔓 Desactivar bloqueo</button>
+      </div>
+    </div>`;
+}
+
+function initBloqueo() {
+  if (debeBloquear()) mostrarPantallaBloqueo();
+  else if (leerConfigBloqueo()) marcarUltimaActividad();
+  document.addEventListener("visibilitychange", () => {
+    if (!leerConfigBloqueo()) return;
+    if (document.visibilityState === "hidden") {
+      if (!appBloqueada) marcarUltimaActividad();
+    } else if (!appBloqueada && debeBloquear()) {
+      mostrarPantallaBloqueo();
+    }
+  });
+  // Mientras la usás, se va anotando que está activa (por si el celu cierra
+  // la app de golpe sin avisar).
+  setInterval(() => {
+    if (!appBloqueada && document.visibilityState === "visible" && leerConfigBloqueo()) marcarUltimaActividad();
+  }, 30000);
+}
+
 // ═══════════════════════════════════════════════════════════════
+initBloqueo();
 initOfflineIndicator();
 cargarDatos();
