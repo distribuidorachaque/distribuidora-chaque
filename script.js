@@ -3536,6 +3536,7 @@ function renderOrderCard(order) {
         ${order.pagado || (order.pagos || []).length > 0 ? `<button class="btn-sm btn-pago-deshacer" onclick="resetearPagos('${order.id}')">↩ Resetear</button>` : ''}
         ${(order.pagos || []).length > 0 ? `<button class="btn-sm btn-outline" onclick="enviarConfirmacionPago('${order.id}')">💬 Avisar pago</button>` : ''}
       `}
+      ${botonFacturadoPedido(order)}
       <button class="btn-sm btn-outline" onclick="editarPedido('${order.id}')">✏️ Editar</button>
       <button class="btn-sm btn-outline" onclick="enviarWhatsAppPedidoGuardado('${order.id}')">📱 WA</button>
       <button class="btn-sm btn-outline" onclick="generarPDFPedidoGuardado('${order.id}')">📄 PDF</button>
@@ -3862,6 +3863,166 @@ function renderVistaDeudores() {
   if (busquedaDeudores) filtrarDeudores(busquedaDeudores);
 }
 
+// ── Monotributo: control de lo facturado ─────────────────────────────────────
+// Cada pedido entregado se puede marcar como "Facturado" (con el número de
+// factura, opcional). En el Resumen se ve cuánto se facturó y cuánto quedó
+// sin factura, y lo facturado en los últimos 12 meses contra el tope de la
+// categoría. Solo cuentan los pedidos desde la fecha de alta en el
+// monotributo. La categoría, el tope y la fecha de alta los carga uno mismo
+// y viajan a Google junto con la config del vehículo.
+let monotributoConfigAbierto = false;
+
+function fechaPedidoComoDate(o) {
+  const p = String(o.fecha || "").replace(/,.*/, "").split("/");
+  return new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0]));
+}
+
+function fechaAltaMonotributo() {
+  if (!configVehiculo.monoAlta) return null;
+  const [y, m, d] = configVehiculo.monoAlta.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+// Pedidos entregados (no borrador, no eliminados) desde el alta.
+function pedidosDesdeAltaMonotributo() {
+  const alta = fechaAltaMonotributo();
+  if (!alta) return [];
+  return orders.filter(o => !o.borrador && !o.eliminado && fechaPedidoComoDate(o) >= alta);
+}
+
+function botonFacturadoPedido(order) {
+  const alta = fechaAltaMonotributo();
+  if (!alta || order.borrador || fechaPedidoComoDate(order) < alta) return "";
+  return order.facturado
+    ? `<button class="btn-sm" style="background:#059669; color:#fff; border:none;" onclick="toggleFacturado('${order.id}')">🧾 Facturado${order.nroFactura ? " Nº " + order.nroFactura : ""}</button>`
+    : `<button class="btn-sm btn-outline" style="border-color:#f59e0b; color:#92400e;" onclick="toggleFacturado('${order.id}')">🧾 Sin factura</button>`;
+}
+
+function toggleFacturado(orderId) {
+  const order = orders.find(o => o.id === orderId);
+  if (!order) return;
+  if (order.facturado) {
+    if (!confirm("¿Le sacás la marca de facturado a este pedido?")) return;
+    order.facturado = false;
+    order.nroFactura = "";
+  } else {
+    const nro = prompt("🧾 Número de factura (opcional, podés dejarlo vacío):", "");
+    if (nro === null) return; // tocó Cancelar
+    order.facturado = true;
+    order.nroFactura = nro.trim();
+  }
+  order.actualizadoEn = Date.now();
+  guardarStorage();
+  renderVistaHistorial();
+}
+
+function toggleMonotributoConfig() {
+  monotributoConfigAbierto = !monotributoConfigAbierto;
+  renderVistaResumen();
+}
+
+function guardarConfigMonotributo() {
+  const alta = document.getElementById("monoAlta").value;
+  if (!alta) return alert("Cargá la fecha de alta en el monotributo");
+  configVehiculo = {
+    ...configVehiculo,
+    monoCategoria: document.getElementById("monoCategoria").value.trim().toUpperCase(),
+    monoTope: parseNumber(document.getElementById("monoTope").value) || 0,
+    monoAlta: alta,
+    actualizadoEn: Date.now()
+  };
+  localStorage.setItem("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
+  fetchConTimeout(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "vehiculo", payload: [configVehiculo] }) });
+  kmPorMes = configVehiculo.kmPorMes;
+  metaPorMes = configVehiculo.metaPorMes;
+  monotributoConfigAbierto = false;
+  renderVistaResumen();
+}
+
+function renderCardMonotributo(mesSel, anioSel, mesNombre) {
+  const alta = fechaAltaMonotributo();
+  const tope = configVehiculo.monoTope || 0;
+  const cat = configVehiculo.monoCategoria || "";
+  const abierto = monotributoConfigAbierto || !alta;
+  const estiloInput = "width:100%; box-sizing:border-box; border:1.5px solid #d1d5db; border-radius:8px; padding:8px; font-size:14px; margin-bottom:8px;";
+
+  const formConfig = `
+    <div style="margin-top:10px; padding-top:10px; border-top:1px solid #e5e7eb;">
+      <label class="muted" style="font-size:13px;">Fecha de alta en el monotributo</label>
+      <input type="date" id="monoAlta" value="${configVehiculo.monoAlta || ""}" style="${estiloInput}" />
+      <label class="muted" style="font-size:13px;">Categoría (ej: A, B, C…)</label>
+      <input type="text" id="monoCategoria" value="${cat}" maxlength="2" style="${estiloInput}" />
+      <label class="muted" style="font-size:13px;">Tope anual de facturación de tu categoría ($)</label>
+      <input type="text" inputmode="decimal" id="monoTope" value="${tope ? montoParaInput(tope).toLocaleString("es-AR") : ""}" placeholder="Ej: 10.000.000" style="${estiloInput}" />
+      <button class="btn-primary btn-full" onclick="guardarConfigMonotributo()">💾 Guardar</button>
+    </div>`;
+
+  if (!alta) {
+    return `
+    <div class="form-card" style="border-left:4px solid #2563eb;">
+      <h3 class="section-title">🧾 Monotributo</h3>
+      <p class="muted" style="margin:0;">Cargá tu fecha de alta, la categoría y el tope anual. Desde esa fecha vas a poder marcar cada pedido como facturado y ver acá cuánto llevás facturado.</p>
+      ${formConfig}
+    </div>`;
+  }
+
+  const desdeAlta = pedidosDesdeAltaMonotributo();
+  const delMes = desdeAlta.filter(o => { const f = fechaPedidoComoDate(o); return f.getMonth() + 1 === mesSel && f.getFullYear() === anioSel; });
+  const factMes = delMes.filter(o => o.facturado).reduce((a, o) => a + o.totals.totalSinIVA, 0);
+  const totalMes = delMes.reduce((a, o) => a + o.totals.totalSinIVA, 0);
+
+  // Últimos 12 meses hasta hoy (o desde el alta, si es más reciente)
+  const hoy = new Date();
+  const hace12 = new Date(hoy.getFullYear() - 1, hoy.getMonth(), hoy.getDate() + 1);
+  const ult12 = desdeAlta.filter(o => fechaPedidoComoDate(o) >= hace12);
+  const fact12 = ult12.filter(o => o.facturado).reduce((a, o) => a + o.totals.totalSinIVA, 0);
+  const total12 = ult12.reduce((a, o) => a + o.totals.totalSinIVA, 0);
+  const desdeTexto = alta > hace12 ? `desde tu alta (${alta.toLocaleDateString("es-AR")})` : "últimos 12 meses";
+
+  const pct = tope > 0 ? Math.round((fact12 / tope) * 100) : 0;
+  const pctTodo = tope > 0 ? Math.round((total12 / tope) * 100) : 0;
+  const color = pct >= 100 ? "#dc2626" : pct >= 80 ? "#f59e0b" : "#059669";
+
+  return `
+    <div class="form-card" style="border-left:4px solid #2563eb;">
+      <h3 class="section-title">🧾 Monotributo${cat ? " — Categoría " + cat : ""}</h3>
+      <div class="muted" style="margin-bottom:6px;">${mesNombre} ${anioSel}</div>
+      <div class="stats-grid">
+        <div class="stat-box">
+          <div class="muted">Facturado</div>
+          <strong style="font-size:13px; color:#059669;">${formatCurrency(factMes)}</strong>
+        </div>
+        <div class="stat-box">
+          <div class="muted">Sin factura</div>
+          <strong style="font-size:13px; color:#92400e;">${formatCurrency(totalMes - factMes)}</strong>
+        </div>
+        <div class="stat-box">
+          <div class="muted">Total vendido</div>
+          <strong style="font-size:13px;">${formatCurrency(totalMes)}</strong>
+        </div>
+      </div>
+
+      <div style="margin-top:14px;">
+        <div class="muted" style="margin-bottom:4px;">📈 Facturado ${desdeTexto}</div>
+        ${tope > 0 ? `
+          <div style="background:#e5e7eb; border-radius:6px; height:14px; overflow:hidden;">
+            <div style="background:${color}; height:100%; width:${Math.min(100, pct)}%;"></div>
+          </div>
+          <p style="margin:6px 0 0; font-size:14px;"><strong>${formatCurrency(fact12)}</strong> de ${formatCurrency(tope)} (${pct}%)</p>
+          ${pct >= 100 ? `<p style="margin:4px 0 0; color:#dc2626; font-size:13px;">🔴 Ya pasaste el tope de tu categoría. Consultalo con tu contador.</p>`
+            : pct >= 80 ? `<p style="margin:4px 0 0; color:#92400e; font-size:13px;">🟡 Estás cerca del tope de tu categoría.</p>` : ""}
+          <p class="muted" style="margin:8px 0 0; font-size:13px;">Si facturaras todo lo vendido: ${formatCurrency(total12)} (${pctTodo}% del tope)${pctTodo >= 100 && pct < 100 ? " — 🔴 te pasarías del tope" : ""}</p>
+        ` : `
+          <p style="margin:0; font-size:14px;"><strong>${formatCurrency(fact12)}</strong> facturado · ${formatCurrency(total12)} vendido en total</p>
+          <p class="muted" style="margin:4px 0 0; font-size:13px;">Cargá el tope de tu categoría para ver cuánto te falta.</p>
+        `}
+      </div>
+
+      <p class="muted" style="margin:10px 0 0; font-size:13px; cursor:pointer;" onclick="toggleMonotributoConfig()">⚙️ Cambiar categoría, tope o fecha de alta ${abierto ? "▲" : "▼"}</p>
+      ${abierto ? formConfig : ""}
+    </div>`;
+}
+
 // ── Vista: RESUMEN ────────────────────────────────────────────────────────────
 let fechaResumen = fechaHoyLocal();
 let mesResumen = claveMesActual();
@@ -4078,6 +4239,8 @@ function renderVistaResumen() {
         </div>`;
       })()}
     </div>
+
+    ${renderCardMonotributo(mesResumenSel, anioResumenSel, mesResumenCapital)}
 
     ${(() => {
       const topClientesMes = calcularTopClientesDelMes(mesResumenSel, anioResumenSel, 5);
