@@ -6080,20 +6080,22 @@ function initBloqueo() {
 }
 
 // ── Marca de agua: logo clarito de fondo en todas las pantallas ────────────
-// Va fija en el centro, muy transparente y por encima del contenido (así se
-// ve también sobre las tarjetas blancas), pero sin tapar los toques: los
-// clics pasan de largo. Queda por debajo del encabezado, el menú de abajo y
-// las ventanitas.
-const MARCA_AGUA_OPACIDAD = 0.07;
+// Va fija en el centro, POR DETRÁS de todo el contenido (como un fondo de
+// pantalla): se ve en el fondo gris, y las tarjetas blancas pasan por encima.
+// No tapa los toques (los clics pasan de largo).
+const MARCA_AGUA_OPACIDAD = 0.14;
 function initMarcaDeAgua() {
   const img = document.createElement("img");
   img.id = "marcaDeAgua";
   img.src = "img/logo-factura.png";
   img.alt = "";
   img.setAttribute("aria-hidden", "true");
-  img.style.cssText = `position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); width:min(75vw, 420px); height:auto; opacity:${MARCA_AGUA_OPACIDAD}; pointer-events:none; user-select:none; z-index:5; mix-blend-mode:multiply;`;
+  img.style.cssText = `position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); width:min(75vw, 420px); height:auto; opacity:${MARCA_AGUA_OPACIDAD}; pointer-events:none; user-select:none; z-index:0; mix-blend-mode:multiply;`;
   img.onerror = () => img.remove(); // sin internet y sin la imagen: no se muestra nada
   document.body.appendChild(img);
+  // La app va en una capa por encima del logo.
+  const app = document.getElementById("app");
+  if (app) { app.style.position = "relative"; app.style.zIndex = "1"; }
 }
 
 // ═══════════════════════════════════════════════════════════════
