@@ -4137,6 +4137,72 @@ function desactivarMonotributo() {
   renderVistaResumen();
 }
 
+// Excel con los pedidos facturados de un mes, para mandarle al contador.
+// Solo van los facturados (lo sin factura no se incluye).
+function exportarExcelContador(mes, anio) {
+  const correr = () => generarExcelContador(mes, anio);
+  if (window.XLSX) return correr();
+  const s = document.createElement("script");
+  s.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+  s.onload = correr;
+  s.onerror = () => alert("No se pudo cargar la herramienta de Excel. Revisá la conexión a internet.");
+  document.head.appendChild(s);
+}
+
+function generarExcelContador(mes, anio) {
+  const nombreMes = MESES_ES[mes - 1];
+  const facturados = pedidosDesdeAltaMonotributo()
+    .filter(o => {
+      if (!o.facturado) return false;
+      const f = fechaPedidoComoDate(o);
+      return f.getMonth() + 1 === mes && f.getFullYear() === anio;
+    })
+    .sort(ordenarPorFechaAsc);
+  if (facturados.length === 0) return alert(`No hay pedidos marcados como facturados en ${nombreMes} ${anio}.`);
+
+  const FORMATO_PESOS = '"$" #,##0.00';
+  const filas = [["Fecha", "Nº de factura", "Cliente", "Monto"]];
+  facturados.forEach(o => {
+    filas.push([String(o.fecha).replace(/,.*/, ""), o.nroFactura || "(sin número)", o.client.nombre, o.totals.totalSinIVA]);
+  });
+  const ultima = filas.length;
+  filas.push(["TOTAL", "", `${facturados.length} factura${facturados.length === 1 ? "" : "s"}`, null]);
+  const ws1 = XLSX.utils.aoa_to_sheet(filas);
+  ws1["D" + (ultima + 1)] = { t: "n", f: `SUM(D2:D${ultima})`, v: facturados.reduce((a, o) => a + o.totals.totalSinIVA, 0) };
+  for (let r = 2; r <= ultima + 1; r++) if (ws1["D" + r]) ws1["D" + r].z = FORMATO_PESOS;
+  ws1["!cols"] = [12, 18, 32, 16].map(w => ({ wch: w }));
+
+  // Hoja 2: resumen del mes y de los últimos 12 meses
+  const totalMes = facturados.reduce((a, o) => a + o.totals.totalSinIVA, 0);
+  const hoy = new Date();
+  const hace12 = new Date(hoy.getFullYear() - 1, hoy.getMonth(), hoy.getDate() + 1);
+  const fact12 = pedidosDesdeAltaMonotributo()
+    .filter(o => o.facturado && fechaPedidoComoDate(o) >= hace12)
+    .reduce((a, o) => a + o.totals.totalSinIVA, 0);
+  const tope = configVehiculo.monoTope || 0;
+  const resumen = [
+    ["Distribuidora Chaque — Monotributo"],
+    [],
+    ["Mes", `${nombreMes} ${anio}`],
+    ["Categoría", configVehiculo.monoCategoria || "-"],
+    ["Fecha de alta", fechaAltaMonotributo() ? fechaAltaMonotributo().toLocaleDateString("es-AR") : "-"],
+    ["Cantidad de facturas del mes", facturados.length],
+    ["Total facturado del mes", totalMes],
+    ["Facturado en los últimos 12 meses (al " + hoy.toLocaleDateString("es-AR") + ")", fact12],
+    ["Tope anual de la categoría", tope || "-"],
+    ["Porcentaje del tope usado", tope ? fact12 / tope : "-"]
+  ];
+  const ws2 = XLSX.utils.aoa_to_sheet(resumen);
+  ["B7", "B8", "B9"].forEach(c => { if (ws2[c] && ws2[c].t === "n") ws2[c].z = FORMATO_PESOS; });
+  if (ws2.B10 && ws2.B10.t === "n") ws2.B10.z = "0%";
+  ws2["!cols"] = [{ wch: 52 }, { wch: 22 }];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws1, "Facturas");
+  XLSX.utils.book_append_sheet(wb, ws2, "Resumen");
+  XLSX.writeFile(wb, `Facturado_${nombreMes}_${anio}_Distribuidora_Chaque.xlsx`);
+}
+
 function renderCardMonotributo(mesSel, anioSel, mesNombre) {
   const alta = fechaAltaMonotributo();
   const tope = configVehiculo.monoTope || 0;
@@ -4200,6 +4266,8 @@ function renderCardMonotributo(mesSel, anioSel, mesNombre) {
           <strong style="font-size:13px;">${formatCurrency(totalMes)}</strong>
         </div>
       </div>
+
+      <button class="btn-success btn-full" style="margin-top:10px; color:#fff;" onclick="exportarExcelContador(${mesSel}, ${anioSel})">📥 Excel para el contador (${mesNombre})</button>
 
       <div style="margin-top:14px;">
         <div class="muted" style="margin-bottom:4px;">📈 Facturado ${desdeTexto}</div>
