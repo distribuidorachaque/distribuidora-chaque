@@ -179,7 +179,7 @@ Object.keys(metaPorMes).forEach(k => {
 });
 if (huboMigracionLocal) {
   configVehiculo.actualizadoEn = Date.now();
-  localStorage.setItem("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
+  setItemSeguro("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
   fetchConTimeout(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "vehiculo", payload: [configVehiculo] }) });
 }
 // A partir de acá, kmPorMes y metaPorMes apuntan al mismo objeto que
@@ -194,11 +194,92 @@ let mensajeAvisoMarca = "";
 let enviadosAvisoMarca = new Set();
 
 // ── Almacenamiento ───────────────────────────────────────────────────────────
+// ── Espacio en el dispositivo ───────────────────────────────────────────
+// El navegador le da a cada página un espacio limitado (unos 5 millones de
+// caracteres). Si se llena, guardar en el dispositivo falla: antes eso cortaba
+// todo el guardado (ni siquiera llegaba a Google) sin avisar. Ahora se avisa
+// y el guardado en Google sigue igual.
+var ESPACIO_LIMITE_APROX = 5000000;
+var ultimoAvisoEspacio = 0;
+var avisoEspacioCasiLlenoMostrado = false;
+
+function espacioUsado() {
+  let total = 0;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      total += k.length + (localStorage.getItem(k) || "").length;
+    }
+  } catch {}
+  return total;
+}
+
+function porcentajeEspacio() {
+  return Math.min(100, Math.round((espacioUsado() / ESPACIO_LIMITE_APROX) * 100));
+}
+
+function mostrarBarraEspacio(texto) {
+  const bar = document.getElementById("offline-bar");
+  if (!bar) return;
+  bar.textContent = texto;
+  bar.classList.remove("offline-bar-ok");
+  bar.classList.add("offline-bar-visible");
+  setTimeout(() => { if (navigator.onLine) bar.classList.remove("offline-bar-visible"); }, 10000);
+}
+
+function avisarSinEspacio() {
+  if (Date.now() - ultimoAvisoEspacio < 60000) return;
+  ultimoAvisoEspacio = Date.now();
+  mostrarBarraEspacio("⚠️ Este dispositivo se quedó sin espacio para la app. Lo nuevo se guarda en Google igual. Mirá 💾 Backup.");
+}
+
+function revisarEspacioCasiLleno() {
+  if (avisoEspacioCasiLlenoMostrado) return;
+  const pct = porcentajeEspacio();
+  if (pct >= 80) {
+    avisoEspacioCasiLlenoMostrado = true;
+    mostrarBarraEspacio(`⚠️ El espacio de la app en este dispositivo está al ${pct}%. Mirá 💾 Backup.`);
+  }
+}
+
+function setItemSeguro(clave, valor) {
+  try {
+    localStorage.setItem(clave, valor);
+    return true;
+  } catch (e) {
+    console.log("No se pudo guardar en el dispositivo:", clave, e);
+    avisarSinEspacio();
+    return false;
+  }
+}
+
 function guardarLocal() {
-  localStorage.setItem(STORAGE_KEYS.clients, JSON.stringify(clients));
-  localStorage.setItem(STORAGE_KEYS.catalog, JSON.stringify(catalog));
-  localStorage.setItem(STORAGE_KEYS.orders,  JSON.stringify(orders));
-  localStorage.setItem(STORAGE_KEYS.inversiones, JSON.stringify(inversiones));
+  const ok = [
+    setItemSeguro(STORAGE_KEYS.clients, JSON.stringify(clients)),
+    setItemSeguro(STORAGE_KEYS.catalog, JSON.stringify(catalog)),
+    setItemSeguro(STORAGE_KEYS.orders,  JSON.stringify(orders)),
+    setItemSeguro(STORAGE_KEYS.inversiones, JSON.stringify(inversiones))
+  ].every(Boolean);
+  // Si ya se avisó que no hay espacio, no se tapa ese aviso con el del 80%.
+  if (ok) revisarEspacioCasiLleno();
+}
+
+function renderCardEspacio() {
+  const usado = espacioUsado();
+  const pct = porcentajeEspacio();
+  const color = pct >= 90 ? "#dc2626" : pct >= 80 ? "#f59e0b" : "#059669";
+  const millones = (usado / 1000000).toLocaleString("es-AR", { maximumFractionDigits: 2 });
+  return `
+    <div class="form-card">
+      <h3 class="section-title">📱 Espacio en este dispositivo</h3>
+      <div style="background:#e5e7eb; border-radius:6px; height:14px; overflow:hidden;">
+        <div style="background:${color}; height:100%; width:${Math.max(1, pct)}%;"></div>
+      </div>
+      <p style="margin:6px 0 0; font-size:14px;"><strong>${pct}%</strong> usado <span class="muted">(${millones} de unos 5 millones de caracteres)</span></p>
+      <p class="muted" style="margin:6px 0 0; font-size:13px;">${pct >= 80
+        ? "⚠️ Se está llenando. Exportá un backup y avisale a Claude para liberar espacio."
+        : "✅ Hay lugar de sobra. Si llega al 80% te va a aparecer un aviso."}</p>
+    </div>`;
 }
 
 // ── Seguro: evita que se solapen guardados/sincronizaciones ────────────────
@@ -1590,7 +1671,7 @@ function guardarConfigVehiculo() {
     bateriaAnios: parseNumber(document.getElementById("cfgBateriaAnios").value) || 1,
     actualizadoEn: Date.now()
   };
-  localStorage.setItem("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
+  setItemSeguro("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
   // La mandamos a Drive para que se vea igual en todos tus dispositivos
   fetchConTimeout(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "vehiculo", payload: [configVehiculo] }) });
   kmPorMes = configVehiculo.kmPorMes;
@@ -1610,7 +1691,7 @@ async function sincronizarConfigVehiculo() {
       configVehiculo = remoto;
       kmPorMes = configVehiculo.kmPorMes;
       metaPorMes = configVehiculo.metaPorMes;
-      localStorage.setItem("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
+      setItemSeguro("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
       if (vistaActual === "resumen") renderVistaResumen();
     }
   } catch (e) {
@@ -1785,7 +1866,7 @@ function guardarMetaMes() {
   const val = parseNumber(document.getElementById("inputMetaMes")?.value) || 0;
   metaPorMes[mesResumen] = val;
   configVehiculo.actualizadoEn = Date.now();
-  localStorage.setItem("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
+  setItemSeguro("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
   fetchConTimeout(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "vehiculo", payload: [configVehiculo] }) });
   renderVistaResumen();
 }
@@ -2515,7 +2596,7 @@ function importarDatos(event) {
           configVehiculo.actualizadoEn = Date.now();
           kmPorMes = configVehiculo.kmPorMes;
           metaPorMes = configVehiculo.metaPorMes;
-          localStorage.setItem("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
+          setItemSeguro("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
           fetchConTimeout(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "vehiculo", payload: [configVehiculo] }) });
         }
       }
@@ -4012,7 +4093,7 @@ function guardarConfigMonotributo() {
     monoAlta: alta,
     actualizadoEn: Date.now()
   };
-  localStorage.setItem("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
+  setItemSeguro("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
   fetchConTimeout(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "vehiculo", payload: [configVehiculo] }) });
   kmPorMes = configVehiculo.kmPorMes;
   metaPorMes = configVehiculo.metaPorMes;
@@ -4025,7 +4106,7 @@ function guardarConfigMonotributo() {
 function desactivarMonotributo() {
   if (!confirm("¿Borrás la fecha de alta? El control del monotributo se apaga hasta que cargues una fecha nueva.")) return;
   configVehiculo = { ...configVehiculo, monoAlta: "", actualizadoEn: Date.now() };
-  localStorage.setItem("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
+  setItemSeguro("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
   fetchConTimeout(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "vehiculo", payload: [configVehiculo] }) });
   kmPorMes = configVehiculo.kmPorMes;
   metaPorMes = configVehiculo.metaPorMes;
@@ -4951,7 +5032,7 @@ function registrarGastoVehiculo() {
 function guardarKmMes() {
   kmPorMes[mesResumen] = parseInt(document.getElementById("inputKmMes").value) || 0;
   configVehiculo.actualizadoEn = Date.now();
-  localStorage.setItem("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
+  setItemSeguro("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
   fetchConTimeout(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "vehiculo", payload: [configVehiculo] }) });
   renderVistaResumen();
 }
@@ -5269,6 +5350,8 @@ function renderVistaBackup() {
       <input id="importBackupInput" type="file" accept=".json" style="display:none;" onchange="importarDatos(event)" />
     </div>
 
+    ${renderCardEspacio()}
+
     ${renderCardClaveGoogle()}
 
     ${renderCardBloqueo()}
@@ -5332,7 +5415,7 @@ function cargarJsPDF() {
 
 function obtenerNroFactura() {
   const n = parseInt(localStorage.getItem("alunexa_nro_factura") || "0") + 1;
-  localStorage.setItem("alunexa_nro_factura", n);
+  setItemSeguro("alunexa_nro_factura", n);
   return n;
 }
 
