@@ -565,6 +565,7 @@ async function sincronizarSilencioso() {
     const [dC, dCat, dP, dI] = await Promise.all([rC.json(), rCat.json(), rP.json(), rI.json()]);
 
     const antesC = clients.length, antesCat = catalog.length, antesP = orders.length, antesI = inversiones.length;
+    const fotoAntes = JSON.stringify([clients, catalog, orders, inversiones]);
 
     if (dC.length > 0) clients = fusionarPorId(clients, dC.map(r => JSON.parse(r[0])));
     if (dCat.length > 0) catalog = fusionarCatalogoPorNombre(catalog, dCat.map(r => JSON.parse(r[0])));
@@ -573,8 +574,12 @@ async function sincronizarSilencioso() {
 
     necesitaPush = clients.length > antesC || catalog.length > antesCat || orders.length > antesP || inversiones.length > antesI;
 
-    guardarLocal();
-    renderApp();
+    // Solo se vuelve a dibujar la pantalla si llegó algo nuevo (así no te
+    // mueve la pantalla cada vez que revisa y no hay cambios).
+    if (JSON.stringify([clients, catalog, orders, inversiones]) !== fotoAntes) {
+      guardarLocal();
+      renderApp();
+    }
   } catch (e) {
     console.log("Sync silenciosa falló:", e);
   } finally {
@@ -586,6 +591,24 @@ async function sincronizarSilencioso() {
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") sincronizarSilencioso();
 });
+
+// ── Actualización automática cada 2 minutos ────────────────────────────────
+// Si dejás la app abierta (por ejemplo en la compu), cada 2 minutos se fija
+// si cambió algo en Google (lo que cargaste en el celu) y lo trae. No lo hace
+// si estás escribiendo en algún campo, si hay una ventanita abierta, o si
+// estás cargando un pedido o un cliente, para no borrarte lo que tipeás.
+function estaOcupadoEscribiendo() {
+  const el = document.activeElement;
+  if (el && ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName)) return true;
+  return [...document.querySelectorAll(".modal-overlay")].some(m => m.style.display && m.style.display !== "none");
+}
+
+setInterval(() => {
+  if (document.visibilityState !== "visible" || !navigator.onLine) return;
+  if (typeof appBloqueada !== "undefined" && appBloqueada) return;
+  if (estaOcupadoEscribiendo()) return;
+  sincronizarSilencioso();
+}, 120000);
 
 async function guardarAhora() {
   const btn = document.getElementById("btnGuardarAhora");
