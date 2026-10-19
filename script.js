@@ -2545,6 +2545,25 @@ function eliminarProducto(id) {
 }
 
 // ── Stock ─────────────────────────────────────────────────────────────────────
+// Fecha de la última carga de stock hecha A MANO (Sumar o Fijar stock), para
+// acordarse si ya se cargó. Las ventas no la cambian.
+function marcarCargaStock(prod, detalle) {
+  prod.stockCargadoEn = Date.now();
+  prod.stockCargadoDetalle = detalle;
+}
+
+function textoUltimaCargaStock(p) {
+  if (!p.stockCargadoEn) return "";
+  const f = new Date(p.stockCargadoEn);
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  const diaCarga = new Date(f); diaCarga.setHours(0, 0, 0, 0);
+  const dias = Math.round((hoy - diaCarga) / 86400000);
+  const hora = f.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", hour12: false });
+  const cuando = dias === 0 ? `hoy ${hora}` : dias === 1 ? `ayer ${hora}` : f.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" }) + ` ${hora}`;
+  const color = dias === 0 ? "#059669" : "#6b7280";
+  return `<div style="font-size:11px; color:${color}; margin-top:2px;">📦 Stock cargado: ${cuando}${p.stockCargadoDetalle ? ` (${p.stockCargadoDetalle})` : ""}</div>`;
+}
+
 function cargarStock() {
   const id   = document.getElementById("stockProductoSelect").value;
   const cant = Math.max(0, Number(document.getElementById("stockAgregar").value || 0));
@@ -2553,6 +2572,7 @@ function cargarStock() {
   if (cant <= 0) return alert("Ingresá una cantidad mayor a 0");
   prod.stock += cant;
   prod.actualizadoEn = Date.now();
+  marcarCargaStock(prod, "+" + cant);
   guardarStorage();
   document.getElementById("stockAgregar").value = 0;
   renderVistaStock();
@@ -2565,6 +2585,7 @@ function fijarStock() {
   if (!prod) return alert("Seleccioná un producto");
   prod.stock = cant;
   prod.actualizadoEn = Date.now();
+  marcarCargaStock(prod, "fijado en " + cant);
   guardarStorage();
   document.getElementById("stockAgregar").value = 0;
   renderVistaStock();
@@ -5266,6 +5287,7 @@ function renderVistaStock() {
           <div style="flex:1;">
             <div class="stock-nombre">${codigoActual ? `#${codigoActual} · ` : ""}${p.nombre}</div>
             <div class="muted">${p.categoria} · s/IVA: ${formatCurrency(p.precioVentaSinIVA)}${p.precioPublico > 0 ? ` · 🏷️ Público: ${formatCurrency(p.precioPublico)}` : ""} · Costo: ${costoActual > 0 ? formatCurrency(costoActual) : "sin cargar ⚠️"}</div>
+            ${textoUltimaCargaStock(p)}
             <div id="form-precio-${p.id}" style="display:none; margin-top:8px;">
               <div class="row-2">
                 <div class="form-group" style="margin:0;">
