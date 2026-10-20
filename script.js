@@ -1537,7 +1537,12 @@ function guardarCambiosPedido() {
 
   // Solo se toca el stock real si el pedido ya estaba confirmado. Si sigue
   // en borrador, el stock real no se mueve — se sigue "reservando" nomás.
-  if (!orders[idx].borrador) aplicarStock(currentItems, -1);
+  // Si estaba confirmado y le prendiste "Ignorar stock", pasa a borrador: el
+  // stock que se devolvió al entrar a editar queda devuelto, y el pedido te
+  // queda en "Pedidos pendientes de entregar" para Confirmar entrega.
+  const eraConfirmado = !orders[idx].borrador;
+  const pasaABorrador = eraConfirmado && modoBorrador;
+  if (eraConfirmado && !pasaABorrador) aplicarStock(currentItems, -1);
   const tSin  = currentItems.reduce((a, i) => a + i.subtotalSinIVA, 0);
   const tCon  = currentItems.reduce((a, i) => a + i.subtotalConIVA, 0);
   const tCant = currentItems.reduce((a, i) => a + i.cantidad, 0);
@@ -1547,6 +1552,7 @@ function guardarCambiosPedido() {
     notas: document.getElementById("notasPedido").value.trim(),
     modoPrecio: document.getElementById("modoPrecio").value,
     totals: { totalSinIVA: tSin, totalConIVA: tCon, totalCantidad: tCant },
+    borrador: pasaABorrador ? true : orders[idx].borrador,
     actualizadoEn: Date.now()
   };
 
@@ -3623,7 +3629,9 @@ function renderVistaPedido() {
           <span>📋 Ignorar stock (modo borrador)</span>
         </label>
         <div id="avisoBorrador" class="aviso-borrador" style="display:${modoBorrador ? 'block' : 'none'}">
-          ⚠️ No va a descontar stock. Usá este modo para anotar pedidos futuros.
+          ${editingOrderId && orders.find(o => o.id === editingOrderId && !o.borrador)
+            ? "⚠️ Al guardar, este pedido pasa a borrador: se devuelve el stock y te queda en Pedidos pendientes para Confirmar entrega."
+            : "⚠️ No va a descontar stock. Usá este modo para anotar pedidos futuros."}
         </div>
       </div>
     </div>
