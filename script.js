@@ -1675,6 +1675,13 @@ function toggleCostosVehiculo() {
   renderVistaResumen();
 }
 
+// Nafta y Km del mes: arrancan cerrados (como Gastos extraordinarios) para
+// que el Resumen no quede tan largo; se abren tocando el título.
+let naftaAbierto = false;
+let kmAbierto = false;
+function toggleNafta() { naftaAbierto = !naftaAbierto; renderVistaResumen(); }
+function toggleKm() { kmAbierto = !kmAbierto; renderVistaResumen(); }
+
 function toggleGastosExtra() {
   gastosExtraAbierto = !gastosExtraAbierto;
   renderVistaResumen();
@@ -4645,11 +4652,12 @@ function renderVistaResumen() {
       const totalNafta = gastosMes.reduce((a, i) => a + i.monto, 0);
       return `
       <div class="form-card">
-        <h3 class="section-title">⛽ Nafta de ${mesResumenCapital}</h3>
+        <h3 class="section-title" style="cursor:pointer;" onclick="toggleNafta()">⛽ Nafta de ${mesResumenCapital} ${naftaAbierto ? "▲" : "▼"}</h3>
         <div class="stock-row">
           <strong>Gastado en nafta</strong>
           <strong style="color:#dc2626;">${formatCurrency(totalNafta)}</strong>
         </div>
+        ${naftaAbierto ? `
 
         <div class="row-2" style="margin-top:14px;">
           <div class="form-group">
@@ -4676,15 +4684,22 @@ function renderVistaResumen() {
             <button class="btn-sm btn-outline" onclick="eliminarInversion('${i.id}'); setVista('resumen')">🗑️</button>
           </div>
         `).join("") : `<div class="muted" style="margin-top:8px;">Todavía no registraste gastos en ${mesResumenCapital}.</div>`}
+        ` : ""}
       </div>
 
       <div class="form-card">
-        <h3 class="section-title">🛣️ Km recorridos en ${mesResumenCapital}</h3>
-        <div class="form-group">
+        <h3 class="section-title" style="cursor:pointer;" onclick="toggleKm()">🛣️ Km recorridos en ${mesResumenCapital} ${kmAbierto ? "▲" : "▼"}</h3>
+        <div class="stock-row">
+          <strong>Km del mes</strong>
+          <strong>${kmPorMes[mesResumen] ? Number(kmPorMes[mesResumen]).toLocaleString("es-AR") + " km" : '<span style="color:#d97706;">Sin cargar</span>'}</strong>
+        </div>
+        ${kmAbierto ? `
+        <div class="form-group" style="margin-top:10px;">
           <label>Km del mes</label>
           <input id="inputKmMes" type="number" min="0" value="${kmPorMes[mesResumen] || ""}" placeholder="Ej: 1200" />
         </div>
         <button class="btn-primary btn-full" onclick="guardarKmMes()">💾 Guardar km del mes</button>
+        ` : ""}
       </div>`;
     })()}
 
