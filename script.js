@@ -1202,8 +1202,18 @@ const CODIGOS_SUGERIDOS_NORM = Object.fromEntries(
 // eliminados no se borran de verdad — se ocultan de las listas, pero los
 // pedidos viejos que ya los tenían cargados siguen mostrando todo bien,
 // porque cada pedido guarda una foto de los datos al momento de la venta.
+// Productos activos ordenados por código (100, 101, … 400, 401…), así cada
+// producto nuevo cae solo en su lugar. Los que no tienen código van al final,
+// en el orden en que se cargaron.
 function catalogActivo() {
-  return catalog.filter(p => !p.eliminado);
+  const conOrden = catalog.filter(p => !p.eliminado).map((p, i) => ({ p, i, cod: parseInt(codigoDeProducto(p), 10) }));
+  conOrden.sort((a, b) => {
+    const aTiene = !isNaN(a.cod), bTiene = !isNaN(b.cod);
+    if (aTiene && bTiene && a.cod !== b.cod) return a.cod - b.cod;
+    if (aTiene !== bTiene) return aTiene ? -1 : 1;
+    return a.i - b.i;
+  });
+  return conOrden.map(x => x.p);
 }
 
 function codigoDeProducto(p) {
