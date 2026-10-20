@@ -4077,6 +4077,12 @@ function renderVistaDeudores() {
 // monotributo. La categoría, el tope y la fecha de alta los carga uno mismo
 // y viajan a Google junto con la config del vehículo.
 let monotributoConfigAbierto = false;
+let monotributoAbierto = false; // el cuadro arranca cerrado; se abre tocando el título
+
+function toggleMonotributo() {
+  monotributoAbierto = !monotributoAbierto;
+  renderVistaResumen();
+}
 
 function fechaPedidoComoDate(o) {
   const p = String(o.fecha || "").replace(/,.*/, "").split("/");
@@ -4230,6 +4236,20 @@ function renderCardMonotributo(mesSel, anioSel, mesNombre) {
   const cat = configVehiculo.monoCategoria || "";
   const abierto = monotributoConfigAbierto || !alta;
   const estiloInput = "width:100%; box-sizing:border-box; border:1.5px solid #d1d5db; border-radius:8px; padding:8px; font-size:14px; margin-bottom:8px;";
+  const titulo = `🧾 Monotributo${cat ? " — Categoría " + cat : ""}`;
+  if (!monotributoAbierto) {
+    // Cerrado: solo el título y una línea con lo facturado del mes (como Gastos extraordinarios)
+    const factMesCerrado = alta ? pedidosDesdeAltaMonotributo()
+      .filter(o => { const f = fechaPedidoComoDate(o); return o.facturado && f.getMonth() + 1 === mesSel && f.getFullYear() === anioSel; })
+      .reduce((a, o) => a + o.totals.totalSinIVA, 0) : 0;
+    return `
+    <div class="form-card" style="border-left:4px solid #2563eb;">
+      <h3 class="section-title" style="cursor:pointer;" onclick="toggleMonotributo()">${titulo} ▼</h3>
+      ${alta
+        ? `<div class="stock-row"><strong>Facturado en ${mesNombre}</strong><strong style="color:#059669;">${formatCurrency(factMesCerrado)}</strong></div>`
+        : `<p class="muted" style="margin:0; font-size:13px;">Tocá el título para cargar tu fecha de alta, categoría y tope.</p>`}
+    </div>`;
+  }
 
   const formConfig = `
     <div style="margin-top:10px; padding-top:10px; border-top:1px solid #e5e7eb;">
@@ -4246,7 +4266,7 @@ function renderCardMonotributo(mesSel, anioSel, mesNombre) {
   if (!alta) {
     return `
     <div class="form-card" style="border-left:4px solid #2563eb;">
-      <h3 class="section-title">🧾 Monotributo</h3>
+      <h3 class="section-title" style="cursor:pointer;" onclick="toggleMonotributo()">${titulo} ▲</h3>
       <p class="muted" style="margin:0;">Cargá tu fecha de alta, la categoría y el tope anual. Desde esa fecha vas a poder marcar cada pedido como facturado y ver acá cuánto llevás facturado.</p>
       ${formConfig}
     </div>`;
@@ -4271,7 +4291,7 @@ function renderCardMonotributo(mesSel, anioSel, mesNombre) {
 
   return `
     <div class="form-card" style="border-left:4px solid #2563eb;">
-      <h3 class="section-title">🧾 Monotributo${cat ? " — Categoría " + cat : ""}</h3>
+      <h3 class="section-title" style="cursor:pointer;" onclick="toggleMonotributo()">${titulo} ▲</h3>
       <div class="muted" style="margin-bottom:6px;">${mesNombre} ${anioSel}</div>
       <div class="stats-grid">
         <div class="stat-box">
@@ -4528,8 +4548,6 @@ function renderVistaResumen() {
       })()}
     </div>
 
-    ${renderCardMonotributo(mesResumenSel, anioResumenSel, mesResumenCapital)}
-
     ${(() => {
       const topClientesMes = calcularTopClientesDelMes(mesResumenSel, anioResumenSel, 5);
       const topProductosMes = calcularTopProductosDelMes(mesResumenSel, anioResumenSel, 5);
@@ -4614,6 +4632,8 @@ function renderVistaResumen() {
         </div>
       `).join("")}
     </div>` : ""}
+
+    ${renderCardMonotributo(mesResumenSel, anioResumenSel, mesResumenCapital)}
 
     ${(() => {
       const gastosMes = inversiones.filter(i => {
