@@ -742,7 +742,10 @@ function montoParaInput(n) {
 function priceWithIVA(p) { return Number(p || 0) * (1 + IVA_RATE); }
 
 // ── Navegación ───────────────────────────────────────────────────────────────
+let pedidoRecienEntregadoId = null; // para resaltar el pedido que se acaba de entregar
+
 function setVista(vista, clienteId) {
+  if (vista !== "historial") pedidoRecienEntregadoId = null;
   // Al salir de la pantalla de Clientes limpiamos el buscador, así cuando
   // volvés aparece vacío y listo para buscar otro cliente (no queda pegado
   // lo que habías buscado antes de irte a Resumen, Stock, etc.).
@@ -1602,9 +1605,18 @@ function guardarYEntregarPedido() {
 
   promoverPotencial(client.id);
   guardarStorage();
+  // En vez de volver al Resumen, te muestra el pedido recién entregado (en
+  // los pedidos del cliente) para que elijas qué hacer: cobrar, WhatsApp,
+  // PDF o remito.
+  const idEntregado = orders[idx].id;
   currentItems   = [];
   editingOrderId = null;
-  setVista("resumen");
+  pedidoRecienEntregadoId = idEntregado;
+  setVista("historial", client.id);
+  setTimeout(() => {
+    const card = document.getElementById("order-card-" + idEntregado);
+    if (card) card.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, 80);
 }
 
 function cancelarEdicionPedido() {
@@ -3708,7 +3720,7 @@ function renderOrderCard(order) {
   const totalPagado = (order.pagos || []).reduce((a, p) => a + p.monto, 0);
   const formAbierto = ordenConFormPago === order.id;
   return `
-  <div class="order-card ${order.pagado ? 'order-pagada' : 'order-pendiente'}">
+  <div id="order-card-${order.id}" class="order-card ${order.pagado ? 'order-pagada' : 'order-pendiente'}"${order.id === pedidoRecienEntregadoId ? ' style="box-shadow:0 0 0 3px #059669;"' : ""}>
     <div class="order-top">
       <div>
         <div class="order-cliente">${order.client.nombre}</div>
@@ -3798,6 +3810,10 @@ function renderHistorialAgrupado(lista) {
   });
 
   const anios = Object.keys(porAnio).sort((a, b) => b - a);
+  // Si se acaba de entregar un pedido, su año y su mes quedan abiertos.
+  const recien = pedidoRecienEntregadoId ? lista.find(o => o.id === pedidoRecienEntregadoId) : null;
+  const pRecien = recien ? recien.fecha.replace(/,.*/, "").split("/") : null;
+  const anioRecien = pRecien ? pRecien[2] : null, mesRecien = pRecien ? parseInt(pRecien[1]) : null;
 
   return anios.map((anio, idxAnio) => {
     const meses = Object.keys(porAnio[anio]).map(Number).sort((a, b) => b - a);
@@ -3805,7 +3821,7 @@ function renderHistorialAgrupado(lista) {
     const cantAnio = meses.reduce((acc, m) => acc + porAnio[anio][m].length, 0);
 
     return `
-    <details ${idxAnio === 0 ? "open" : ""} style="margin-bottom:10px; background:#fff; border-radius:12px; overflow:hidden; border:1px solid #e5e7eb;">
+    <details ${idxAnio === 0 || anio === anioRecien ? "open" : ""} style="margin-bottom:10px; background:#fff; border-radius:12px; overflow:hidden; border:1px solid #e5e7eb;">
       <summary style="padding:14px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; list-style:none; font-size:16px;">
         <strong>📅 ${anio}</strong>
         <span class="muted" style="font-size:13px;">${cantAnio} pedido${cantAnio > 1 ? "s" : ""} · ${formatCurrency(totalAnio)}</span>
@@ -3815,7 +3831,7 @@ function renderHistorialAgrupado(lista) {
           const pedidosMes = porAnio[anio][mes];
           const totalMes = pedidosMes.reduce((a, o) => a + o.totals.totalSinIVA, 0);
           return `
-          <details ${idxAnio === 0 && idxMes === 0 ? "open" : ""} style="margin-bottom:8px; background:#f8fafc; border-radius:10px; overflow:hidden;">
+          <details ${(idxAnio === 0 && idxMes === 0) || (anio === anioRecien && mes === mesRecien) ? "open" : ""} style="margin-bottom:8px; background:#f8fafc; border-radius:10px; overflow:hidden;">
             <summary style="padding:10px 12px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; list-style:none; font-weight:600; font-size:14px;">
               <span>${NOMBRES_MES[mes - 1]}</span>
               <span class="muted" style="font-size:12px; font-weight:400;">${pedidosMes.length} pedido${pedidosMes.length > 1 ? "s" : ""} · ${formatCurrency(totalMes)}</span>
@@ -3844,6 +3860,13 @@ function renderVistaHistorial() {
       ${client ? `<button class="btn-back" onclick="volverAlCliente()">← Volver</button>` : ""}
       <h2 class="page-title2">${client ? "Pedidos de " + client.nombre : "Todos los pedidos"}</h2>
     </div>
+
+    ${pedidoRecienEntregadoId && lista.some(o => o.id === pedidoRecienEntregadoId) ? `
+    <div style="background:#dcfce7; border:1px solid #86efac; border-radius:12px; padding:12px 14px; margin-bottom:12px;">
+      <strong style="color:#065f46;">✅ Pedido entregado</strong>
+      <div style="font-size:14px; color:#065f46; margin-top:2px;">Elegí qué querés hacer en el pedido marcado en verde: cobrar, WhatsApp, PDF o remito.</div>
+      <button class="btn-sm btn-outline" style="margin-top:8px;" onclick="setVista('resumen')">← Volver a pendientes</button>
+    </div>` : ""}
 
     ${lista.length === 0
       ? `<div class="empty-state">No hay pedidos ${client ? "para este cliente" : "guardados"} aún.</div>`
