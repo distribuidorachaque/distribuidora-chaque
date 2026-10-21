@@ -1953,6 +1953,14 @@ function calcularVentasUltimosMeses(mesFin, anioFin, cantidad) {
 // lo que importa a la hora de hacer el pedido al distribuidor.
 const MESES_ES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 
+// Las ventas se agrupan por PRODUCTO (no por el nombre que tenía cuando se
+// vendió): si le cambiaste el nombre a un producto, sus ventas viejas se
+// suman con las nuevas bajo el nombre actual.
+function productoVendido(i) {
+  const prod = i.productId ? catalog.find(p => p.id === i.productId) : null;
+  return prod ? { clave: prod.id, nombre: prod.nombre } : { clave: "n:" + i.nombre, nombre: i.nombre };
+}
+
 function calcularRankingVentasMarca(marca, soloEsteMes) {
   const porProducto = {};
   orders.forEach(o => {
@@ -1963,13 +1971,13 @@ function calcularRankingVentasMarca(marca, soloEsteMes) {
     }
     o.items.forEach(i => {
       if (i.categoria !== marca) return;
-      if (!porProducto[i.nombre]) porProducto[i.nombre] = { cantidad: 0, total: 0 };
-      porProducto[i.nombre].cantidad += i.cantidad;
-      porProducto[i.nombre].total += i.subtotalSinIVA;
+      const { clave, nombre } = productoVendido(i);
+      if (!porProducto[clave]) porProducto[clave] = { nombre, cantidad: 0, total: 0 };
+      porProducto[clave].cantidad += i.cantidad;
+      porProducto[clave].total += i.subtotalSinIVA;
     });
   });
-  return Object.entries(porProducto)
-    .map(([nombre, d]) => ({ nombre, ...d }))
+  return Object.values(porProducto)
     .sort((a, b) => b.cantidad - a.cantidad);
 }
 
@@ -2033,13 +2041,13 @@ function calcularTopProductosDelMes(mes, anio, limite) {
     const partes = o.fecha.replace(/,.*/, '').split('/');
     if (parseInt(partes[1]) !== mes || parseInt(partes[2]) !== anio) return;
     o.items.forEach(i => {
-      if (!porProducto[i.nombre]) porProducto[i.nombre] = { cantidad: 0, total: 0 };
-      porProducto[i.nombre].cantidad += i.cantidad;
-      porProducto[i.nombre].total += i.subtotalSinIVA;
+      const { clave, nombre } = productoVendido(i);
+      if (!porProducto[clave]) porProducto[clave] = { nombre, cantidad: 0, total: 0 };
+      porProducto[clave].cantidad += i.cantidad;
+      porProducto[clave].total += i.subtotalSinIVA;
     });
   });
-  return Object.entries(porProducto)
-    .map(([nombre, d]) => ({ nombre, ...d }))
+  return Object.values(porProducto)
     .sort((a, b) => b.total - a.total)
     .slice(0, limite);
 }
@@ -2569,6 +2577,41 @@ function guardarPrecio(id) {
 // Borrado "suave": el producto desaparece de Stock, de los pedidos nuevos y
 // de los códigos, pero los pedidos VIEJOS que ya lo tenían cargado siguen
 // mostrando todo bien (cada pedido guarda una foto de los datos de venta).
+// Junta dos productos repetidos en uno solo (el que queda = destino):
+// suma el stock, pasa las ventas (también las de pedidos viejos) al que
+// queda, y el repetido se elimina "suave" (eliminado: true, sigue en el
+// historial). Todo con fecha de cambio, para que se sincronice bien.
+function unificarProducto(idDestino) {
+  const sel = document.getElementById("unificar-" + idDestino);
+  const idOrigen = sel ? sel.value : "";
+  if (!idOrigen) return alert("Elegí el producto repetido.");
+  const destino = catalog.find(p => p.id === idDestino);
+  const origen = catalog.find(p => p.id === idOrigen);
+  if (!destino || !origen || destino.id === origen.id) return;
+
+  const esDelOrigen = i => i.productId === origen.id || (!catalog.some(p => p.id === i.productId) && i.nombre === origen.nombre);
+  const afectados = orders.filter(o => (o.items || []).some(esDelOrigen));
+  const stockFinal = (Number(destino.stock) || 0) + (Number(origen.stock) || 0);
+  if (!confirm(`Va a quedar un solo producto: "${destino.nombre}".\n\n` +
+    `• Stock: ${destino.stock} + ${origen.stock} = ${stockFinal}\n` +
+    `• ${afectados.length} pedido${afectados.length === 1 ? "" : "s"} con "${origen.nombre}" pasan a figurar como "${destino.nombre}"\n` +
+    `• "${origen.nombre}" se elimina (queda en el historial)\n\n¿Seguimos?`)) return;
+
+  const ahora = Date.now();
+  destino.stock = stockFinal;
+  destino.actualizadoEn = ahora;
+  origen.stock = 0;
+  origen.eliminado = true;
+  origen.actualizadoEn = ahora;
+  afectados.forEach(o => {
+    o.items = o.items.map(i => esDelOrigen(i) ? { ...i, productId: destino.id, nombre: destino.nombre, categoria: destino.categoria } : i);
+    o.actualizadoEn = ahora;
+  });
+  guardarStorage();
+  renderVistaStock();
+  alert(`✅ Listo: quedó solo "${destino.nombre}" con ${stockFinal} de stock.`);
+}
+
 function eliminarProducto(id) {
   const prod = catalog.find(p => p.id === id);
   if (!prod) return;
@@ -4432,9 +4475,10 @@ function renderVistaResumen() {
   const productosHoy = {};
   pedidosHoy.forEach(o => {
     o.items.forEach(i => {
-      if (!productosHoy[i.nombre]) productosHoy[i.nombre] = { cantidad: 0, subtotal: 0, categoria: i.categoria };
-      productosHoy[i.nombre].cantidad += i.cantidad;
-      productosHoy[i.nombre].subtotal += i.subtotalSinIVA;
+      const nombreActual = productoVendido(i).nombre;
+      if (!productosHoy[nombreActual]) productosHoy[nombreActual] = { cantidad: 0, subtotal: 0, categoria: i.categoria };
+      productosHoy[nombreActual].cantidad += i.cantidad;
+      productosHoy[nombreActual].subtotal += i.subtotalSinIVA;
     });
   });
   const productosOrdenados = Object.entries(productosHoy).sort((a, b) => b[1].cantidad - a[1].cantidad);
@@ -5401,6 +5445,15 @@ function renderVistaStock() {
                 <button class="btn-success" onclick="guardarPrecio('${p.id}')">Guardar</button>
                 <button class="btn-outline" style="color:#dc2626;" onclick="eliminarProducto('${p.id}')">🗑️ Eliminar</button>
               </div>
+              <details style="margin-top:10px;">
+                <summary style="cursor:pointer; font-size:13px; color:#2563eb;">🔀 ¿Está repetido? Unificar con otro producto</summary>
+                <p class="muted" style="font-size:12px; margin:6px 0;">Elegí el repetido: su stock se suma a "${p.nombre}", sus ventas pasan a este y el repetido se elimina.</p>
+                <select id="unificar-${p.id}" style="width:100%; margin-bottom:6px;">
+                  <option value="">Elegí el producto repetido</option>
+                  ${catalogActivo().filter(x => x.id !== p.id).map(x => `<option value="${x.id}">${x.nombre} · ${x.categoria} · stock ${x.stock}</option>`).join("")}
+                </select>
+                <button class="btn-outline btn-full" onclick="unificarProducto('${p.id}')">🔀 Unificar en "${p.nombre}"</button>
+              </details>
             </div>
           </div>
           <div style="display:flex; align-items:center; gap:8px;">
