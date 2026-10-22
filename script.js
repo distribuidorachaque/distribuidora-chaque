@@ -778,7 +778,7 @@ function verDatosCliente() {
 
   document.getElementById("verClienteNombre").textContent = c.nombre;
 
-  const frecuenciaTxto = Number(c.frecuencia) === 14 ? "Quincenal (cada 14 días)" : (Number(c.frecuencia) === 21 ? "Cada 21 días" : "Semanal (cada 7 días)");
+  const frecuenciaTxto = sinFrecuencia(c) ? "Sin frecuencia" : (Number(c.frecuencia) === 14 ? "Quincenal (cada 14 días)" : (Number(c.frecuencia) === 21 ? "Cada 21 días" : "Semanal (cada 7 días)"));
   const filas = [
     ["Tipo", c.tipo || "Otro"],
     ["Zona", c.zona || "—"],
@@ -815,7 +815,7 @@ function abrirModalCliente(id) {
 
   document.getElementById("modalClienteNombre").textContent = client.nombre;
   document.getElementById("modalClienteInfo").textContent =
-    [client.tipo || "Otro", client.zona ? "📍 " + client.zona : "", client.horario ? "🕐 " + client.horario : "", Number(client.frecuencia) === 14 ? "📅 Quincenal" : (Number(client.frecuencia) === 21 ? "📅 Cada 21 días" : "📅 Semanal"), client.telefono, client.telefono2, client.direccion].filter(Boolean).join(" · ");
+    [client.tipo || "Otro", client.zona ? "📍 " + client.zona : "", client.horario ? "🕐 " + client.horario : "", sinFrecuencia(client) ? "📅 Sin frecuencia" : (Number(client.frecuencia) === 14 ? "📅 Quincenal" : (Number(client.frecuencia) === 21 ? "📅 Cada 21 días" : "📅 Semanal")), client.telefono, client.telefono2, client.direccion].filter(Boolean).join(" · ");
 
   const btnTel2 = document.getElementById("btnModalTelefono2");
   if (btnTel2) btnTel2.style.display = client.telefono2 ? "flex" : "none";
@@ -1024,7 +1024,8 @@ function guardarCliente() {
   const diaVisita  = document.getElementById("formClienteDia")?.value || "";
   const zona       = document.getElementById("formClienteZona")?.value.trim() || "";
   const horario    = document.getElementById("formClienteHorario")?.value || "";
-  const frecuencia = Number(document.getElementById("formClienteFrecuencia")?.value) || 7;
+  const valorFrecuencia = document.getElementById("formClienteFrecuencia")?.value;
+  const frecuencia = valorFrecuencia === "0" ? 0 : (Number(valorFrecuencia) || 7);
   const telefono   = document.getElementById("formClienteTelefono").value.trim();
   const telefono2  = document.getElementById("formClienteTelefono2")?.value.trim() || "";
   const email      = document.getElementById("formClienteEmail").value.trim();
@@ -2887,8 +2888,13 @@ function umbralInactividad(c) {
 
 // Solo los clientes "de ruta" cuentan para inactividad: los potenciales no,
 // y los de tipo "Otro" (familia, amigos) tampoco.
+// "Sin frecuencia" (0): el cliente no tiene día fijo de visita, así que
+// nunca se marca como que pasó sus días sin comprar.
+function sinFrecuencia(c) {
+  return !!c && (c.frecuencia === 0 || c.frecuencia === "0");
+}
 function cuentaInactividad(c) {
-  return c && !c.potencial && (c.tipo || "Otro") !== "Otro";
+  return c && !c.potencial && (c.tipo || "Otro") !== "Otro" && !sinFrecuencia(c);
 }
 
 function contarClientesInactivos() {
@@ -3578,9 +3584,10 @@ function renderVistaFormCliente() {
       <div class="form-group">
         <label>Frecuencia de visita</label>
         <select id="formClienteFrecuencia">
-          <option value="7" ${!c || (Number(c.frecuencia) !== 14 && Number(c.frecuencia) !== 21) ? "selected" : ""}>Semanal (cada 7 días)</option>
+          <option value="7" ${!c || (Number(c.frecuencia) !== 14 && Number(c.frecuencia) !== 21 && !sinFrecuencia(c)) ? "selected" : ""}>Semanal (cada 7 días)</option>
           <option value="14" ${c && Number(c.frecuencia) === 14 ? "selected" : ""}>Quincenal (cada 14 días)</option>
           <option value="21" ${c && Number(c.frecuencia) === 21 ? "selected" : ""}>Cada 21 días</option>
+          <option value="0" ${sinFrecuencia(c) ? "selected" : ""}>Sin frecuencia (no avisar días sin comprar)</option>
         </select>
       </div>
       <div class="form-group">
