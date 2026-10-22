@@ -1707,6 +1707,28 @@ function toggleCostosVehiculo() {
 // Nafta y Km del mes: arrancan cerrados (como Gastos extraordinarios) para
 // que el Resumen no quede tan largo; se abren tocando el título.
 let naftaAbierto = false;
+let topClientesAbierto = false, topProductosAbierto = false, topHistoricoAbierto = false;
+function toggleTopClientes() { topClientesAbierto = !topClientesAbierto; renderVistaResumen(); }
+function toggleTopProductos() { topProductosAbierto = !topProductosAbierto; renderVistaResumen(); }
+function toggleTopHistorico() { topHistoricoAbierto = !topHistoricoAbierto; renderVistaResumen(); }
+
+// Cuadro plegable de ranking: cerrado muestra solo el primero.
+function cardRankingPlegable(titulo, abierto, toggle, lista, sub, vacio) {
+  const medallas = ["🥇", "🥈", "🥉", "4.", "5."];
+  const fila = (x, i) => `
+    <div class="stock-row">
+      <div>
+        <div class="stock-nombre">${medallas[i]} ${x.nombre}</div>
+        <div class="muted">${sub(x)}</div>
+      </div>
+      <strong>${formatCurrency(x.total)}</strong>
+    </div>`;
+  return `
+    <div class="form-card">
+      <h3 class="section-title" style="cursor:pointer;" onclick="${toggle}()">${titulo} ${abierto ? "▲" : "▼"}</h3>
+      ${lista.length === 0 ? `<p class="muted" style="margin:0;">${vacio}</p>` : (abierto ? lista.map(fila).join("") : fila(lista[0], 0))}
+    </div>`;
+}
 let kmAbierto = false;
 function toggleNafta() { naftaAbierto = !naftaAbierto; renderVistaResumen(); }
 function toggleKm() { kmAbierto = !kmAbierto; renderVistaResumen(); }
@@ -2012,11 +2034,19 @@ function navegarMesRanking(delta) {
   renderVistaStock();
 }
 
+// Los clientes tipo "Otro" (familia, amigos, Venta web) no cuentan en los
+// rankings de clientes.
+function cuentaParaTopClientes(o) {
+  if (esPedidoWeb(o)) return false;
+  const c = clients.find(x => x.id === o.client.id);
+  return ((c && c.tipo) || o.client.tipo || "Otro") !== "Otro";
+}
+
 function calcularTopClientes(limite) {
 
   const porCliente = {};
   orders.forEach(o => {
-    if (o.borrador || o.eliminado || esPedidoWeb(o)) return;
+    if (o.borrador || o.eliminado || !cuentaParaTopClientes(o)) return;
     const id = o.client.id;
     if (!porCliente[id]) porCliente[id] = { nombre: o.client.nombre, total: 0, pedidos: 0 };
     porCliente[id].total += o.totals.totalSinIVA;
@@ -2031,7 +2061,7 @@ function calcularTopClientes(limite) {
 function calcularTopClientesDelMes(mes, anio, limite) {
   const porCliente = {};
   orders.forEach(o => {
-    if (o.borrador || o.eliminado || esPedidoWeb(o)) return;
+    if (o.borrador || o.eliminado || !cuentaParaTopClientes(o)) return;
     const partes = o.fecha.replace(/,.*/, '').split('/');
     if (parseInt(partes[1]) !== mes || parseInt(partes[2]) !== anio) return;
     const id = o.client.id;
@@ -4959,52 +4989,18 @@ function renderVistaResumen() {
     ${(() => {
       const topClientesMes = calcularTopClientesDelMes(mesResumenSel, anioResumenSel, 5);
       const topProductosMes = calcularTopProductosDelMes(mesResumenSel, anioResumenSel, 5);
-      const medallas = ["🥇", "🥈", "🥉", "4.", "5."];
       if (topClientesMes.length === 0 && topProductosMes.length === 0) return "";
-      return `
-      <div class="form-card">
-        <h3 class="section-title">🏆 Top clientes de ${mesResumenCapital}</h3>
-        ${topClientesMes.length === 0 ? `<p class="muted">Todavía no hay ventas en ${mesResumenCapital}.</p>` : topClientesMes.map((c, i) => `
-          <div class="stock-row">
-            <div>
-              <div class="stock-nombre">${medallas[i]} ${c.nombre}</div>
-              <div class="muted">${c.pedidos} pedido${c.pedidos > 1 ? "s" : ""}</div>
-            </div>
-            <strong>${formatCurrency(c.total)}</strong>
-          </div>
-        `).join("")}
-      </div>
-      <div class="form-card">
-        <h3 class="section-title">📦 Productos más vendidos de ${mesResumenCapital}</h3>
-        ${topProductosMes.length === 0 ? `<p class="muted">Todavía no hay ventas en ${mesResumenCapital}.</p>` : topProductosMes.map((p, i) => `
-          <div class="stock-row">
-            <div>
-              <div class="stock-nombre">${medallas[i]} ${p.nombre}</div>
-              <div class="muted">${p.cantidad} u vendidas</div>
-            </div>
-            <strong>${formatCurrency(p.total)}</strong>
-          </div>
-        `).join("")}
-      </div>`;
+      return cardRankingPlegable(`🏆 Top clientes de ${mesResumenCapital}`, topClientesAbierto, "toggleTopClientes", topClientesMes,
+          c => `${c.pedidos} pedido${c.pedidos > 1 ? "s" : ""}`, `Todavía no hay ventas a clientes en ${mesResumenCapital}.`)
+        + cardRankingPlegable(`📦 Productos más vendidos de ${mesResumenCapital}`, topProductosAbierto, "toggleTopProductos", topProductosMes,
+          p => `${p.cantidad} u vendidas`, `Todavía no hay ventas en ${mesResumenCapital}.`);
     })()}
 
     ${(() => {
       const top = calcularTopClientes(5);
-      const medallas = ["🥇", "🥈", "🥉", "4.", "5."];
       if (top.length === 0) return "";
-      return `
-      <div class="form-card">
-        <h3 class="section-title">🏆 Top clientes (histórico)</h3>
-        ${top.map((c, i) => `
-          <div class="stock-row">
-            <div>
-              <div class="stock-nombre">${medallas[i]} ${c.nombre}</div>
-              <div class="muted">${c.pedidos} pedido${c.pedidos > 1 ? "s" : ""}</div>
-            </div>
-            <strong>${formatCurrency(c.total)}</strong>
-          </div>
-        `).join("")}
-      </div>`;
+      return cardRankingPlegable("🏆 Top clientes (histórico)", topHistoricoAbierto, "toggleTopHistorico", top,
+        c => `${c.pedidos} pedido${c.pedidos > 1 ? "s" : ""}`, "");
     })()}
 
     ${(() => {
