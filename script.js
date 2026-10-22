@@ -2196,13 +2196,33 @@ function clienteTieneDeuda(clienteId) {
 
 function eliminarPedido(id) {
   const order = orders.find(o => o.id === id);
-  if (order) {
-    aplicarStock(order.items, +1);
-    order.eliminado = true;
-    order.actualizadoEn = Date.now();
-  }
+  if (!order) return;
+  if (!confirm(`¿Eliminás este pedido de ${order.client.nombre} (${formatCurrency(order.totals.totalSinIVA)})?`)) return;
+  // Solo se devuelve stock si el pedido estaba entregado: un borrador nunca
+  // lo había descontado.
+  if (!order.borrador) aplicarStock(order.items, +1);
+  order.eliminado = true;
+  order.actualizadoEn = Date.now();
   guardarStorage();
   renderVistaHistorial();
+}
+
+// Eliminar desde la pantalla del pedido (mientras lo estás editando).
+// Al entrar a editar un pedido entregado su stock ya se devolvió, así que
+// acá no se vuelve a sumar: solo se marca eliminado (borrado suave).
+function eliminarPedidoEnEdicion() {
+  const order = orders.find(o => o.id === editingOrderId);
+  if (!order) return;
+  if (!confirm(`¿Eliminás este pedido de ${order.client.nombre}? ${order.borrador ? "" : "Se devuelve el stock de los productos."}`)) return;
+  order.eliminado = true;
+  order.actualizadoEn = Date.now();
+  const clienteId = order.client.id;
+  const eraBorrador = !!order.borrador;
+  currentItems = [];
+  editingOrderId = null; // así salir de la pantalla no vuelve a descontar stock
+  guardarStorage();
+  if (eraBorrador) setVista("resumen");
+  else setVista("historial", clienteId);
 }
 
 // ── WhatsApp ──────────────────────────────────────────────────────────────────
@@ -3745,6 +3765,7 @@ function renderVistaPedido() {
         }
         <button class="btn-whatsapp btn-full" onclick="enviarWhatsAppPedidoActual()">📱 Enviar por WhatsApp</button>
         <button class="btn-pdf btn-full" onclick="generarPDFPedidoActual()">📄 Descargar PDF</button>
+        ${editingOrderId ? `<button class="btn-danger btn-full" style="margin-top:14px;" onclick="eliminarPedidoEnEdicion()">🗑️ Eliminar pedido</button>` : ""}
       </div>
     </div>
   `;
