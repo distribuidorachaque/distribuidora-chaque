@@ -1954,12 +1954,19 @@ function calcularVentasUltimosMeses(mesFin, anioFin, cantidad) {
 // lo que importa a la hora de hacer el pedido al distribuidor.
 const MESES_ES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 
-// Las ventas se agrupan por PRODUCTO (no por el nombre que tenía cuando se
-// vendió): si le cambiaste el nombre a un producto, sus ventas viejas se
-// suman con las nuevas bajo el nombre actual.
+// Las ventas se agrupan por el NOMBRE ACTUAL del producto: si le cambiaste
+// el nombre, sus ventas viejas se suman con las nuevas. Y las ventas viejas
+// cuyo producto ya no existe con ese código interno (la app antes los
+// regeneraba) se juntan con el producto que tiene el mismo nombre, así no
+// aparece dos veces.
 function productoVendido(i) {
-  const prod = i.productId ? catalog.find(p => p.id === i.productId) : null;
-  return prod ? { clave: prod.id, nombre: prod.nombre } : { clave: "n:" + i.nombre, nombre: i.nombre };
+  let prod = i.productId ? catalog.find(p => p.id === i.productId) : null;
+  if (!prod) {
+    const n = normalizarNombreProducto(i.nombre);
+    prod = catalog.find(p => !p.eliminado && normalizarNombreProducto(p.nombre) === n) || null;
+  }
+  const nombre = prod ? prod.nombre : i.nombre;
+  return { clave: normalizarNombreProducto(nombre), nombre };
 }
 
 function calcularRankingVentasMarca(marca, soloEsteMes) {
