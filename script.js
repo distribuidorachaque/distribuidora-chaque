@@ -2008,7 +2008,7 @@ function calcularTopClientes(limite) {
 
   const porCliente = {};
   orders.forEach(o => {
-    if (o.borrador || o.eliminado) return;
+    if (o.borrador || o.eliminado || esPedidoWeb(o)) return;
     const id = o.client.id;
     if (!porCliente[id]) porCliente[id] = { nombre: o.client.nombre, total: 0, pedidos: 0 };
     porCliente[id].total += o.totals.totalSinIVA;
@@ -2023,7 +2023,7 @@ function calcularTopClientes(limite) {
 function calcularTopClientesDelMes(mes, anio, limite) {
   const porCliente = {};
   orders.forEach(o => {
-    if (o.borrador || o.eliminado) return;
+    if (o.borrador || o.eliminado || esPedidoWeb(o)) return;
     const partes = o.fecha.replace(/,.*/, '').split('/');
     if (parseInt(partes[1]) !== mes || parseInt(partes[2]) !== anio) return;
     const id = o.client.id;
@@ -2854,6 +2854,7 @@ function renderApp() {
     case "potenciales": renderVistaPotenciales(); break;
     case "aviso-marca": renderVistaAvisoMarca();  break;
     case "mapa-rutas": renderVistaMapaRutas(); break;
+    case "pedido-web": renderVistaPedidoWeb(); break;
   }
 }
 
@@ -3006,6 +3007,7 @@ function renderVistaClientes() {
       </div>
       <div class="tipo-tabs">
         <button class="tipo-tab" onclick="abrirFormCliente(null)">+ Nuevo</button>
+        <button class="tipo-tab" onclick="abrirPedidoWeb()">🌐 Pedido web</button>
         <button id="btnGuardarAhora" class="tipo-tab" onclick="guardarAhora()">☁️ Guardar</button>
         <button class="tipo-tab" onclick="forzarRecargaDrive()" title="Recargar desde Google Drive">🔄 Recargar</button>
       </div>
@@ -4422,6 +4424,285 @@ function renderCardMonotributo(mesSel, anioSel, mesNombre) {
     </div>`;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// VENTA WEB: pedidos que llegan por WhatsApp desde la página web
+// ═══════════════════════════════════════════════════════════════
+// Se pega el mensaje tal cual llega ("• 3x Producto — $72.000", "Nombre:",
+// "Entrega/Notas:") y se arma el pedido con los precios del mensaje. Todos
+// van al cliente especial "🌐 Venta web" (id fijo, igual en todos los
+// dispositivos) y se cuentan aparte en el Resumen.
+const CLIENTE_WEB_ID = "cliente-venta-web";
+let textoPedidoWeb = "";
+let pedidoWebLeido = null; // { lineas: [{cantidad, nombreWeb, subtotal, productId}], nombre, notas, totalMensaje }
+let ventaWebAbierto = false;
+
+function esPedidoWeb(o) {
+  return !!o && (o.canal === "web" || (o.client && o.client.id === CLIENTE_WEB_ID));
+}
+
+function asegurarClienteWeb() {
+  let c = clients.find(x => x.id === CLIENTE_WEB_ID);
+  if (!c) {
+    c = { id: CLIENTE_WEB_ID, nombre: "🌐 Venta web", tipo: "Otro", telefono: "", email: "", direccion: "", notas: "Pedidos de la página web", actualizadoEn: Date.now() };
+    clients.push(c);
+  } else if (c.eliminado) {
+    c.eliminado = false;
+    c.actualizadoEn = Date.now();
+  }
+  return c;
+}
+
+function normalizarNombreWeb(s) {
+  return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+    .replace(/[^a-z0-9%]+/g, " ").trim();
+}
+
+// Lee el mensaje. Devuelve null si no encuentra ningún producto.
+function leerMensajePedidoWeb(texto) {
+  const lineas = [];
+  String(texto || "").split(/\r?\n/).forEach(l => {
+    const m = l.match(/^\s*[•·\-*]\s*(\d+)\s*[xX×]\s*(.+)\s+[—–-]\s*\$\s*([\d.,]+)\s*$/);
+    if (m) lineas.push({ cantidad: parseInt(m[1], 10), nombreWeb: m[2].trim(), subtotal: parseNumber(m[3]) });
+  });
+  if (lineas.length === 0) return null;
+  const nombre = (String(texto).match(/^\s*Nombre:\s*(.*)$/mi) || [])[1] || "";
+  const notas = (String(texto).match(/^\s*Entrega\s*\/\s*Notas:\s*(.*)$/mi) || [])[1] || "";
+  const total = (String(texto).match(/Total:\s*\$\s*([\d.,]+)/i) || [])[1];
+  return { lineas, nombre: nombre.trim(), notas: notas.trim(), totalMensaje: total ? parseNumber(total) : null };
+}
+
+// Producto de la lista que corresponde al nombre de la web: solo si coincide
+// exacto con el nombre o con un nombre web ya aprendido (aliasWeb).
+function productoParaNombreWeb(nombreWeb) {
+  const n = normalizarNombreWeb(nombreWeb);
+  return catalogActivo().find(p => normalizarNombreWeb(p.nombre) === n || (p.aliasWeb || []).includes(n)) || null;
+}
+
+// Sugerencias ordenadas por parecido (palabras en común).
+function sugerenciasParaNombreWeb(nombreWeb) {
+  const palabras = new Set(normalizarNombreWeb(nombreWeb).split(" ").filter(w => w.length > 2));
+  return catalogActivo()
+    .map(p => {
+      const pp = normalizarNombreWeb(p.nombre + " " + p.categoria).split(" ").filter(w => w.length > 2);
+      return { p, puntos: pp.filter(w => palabras.has(w)).length };
+    })
+    .filter(x => x.puntos > 0)
+    .sort((a, b) => b.puntos - a.puntos)
+    .slice(0, 3)
+    .map(x => x.p);
+}
+
+function abrirPedidoWeb() {
+  textoPedidoWeb = "";
+  pedidoWebLeido = null;
+  setVista("pedido-web");
+}
+
+function procesarMensajeWeb() {
+  const ta = document.getElementById("textoPedidoWeb");
+  textoPedidoWeb = ta ? ta.value : textoPedidoWeb;
+  const leido = leerMensajePedidoWeb(textoPedidoWeb);
+  if (!leido) return alert("No encontré productos en el mensaje. Pegá el mensaje completo, con las líneas que empiezan con •");
+  leido.lineas.forEach(l => { const p = productoParaNombreWeb(l.nombreWeb); l.productId = p ? p.id : ""; });
+  pedidoWebLeido = leido;
+  renderVistaPedidoWeb();
+}
+
+function elegirProductoWeb(idx, productId) {
+  if (!pedidoWebLeido) return;
+  pedidoWebLeido.lineas[idx].productId = productId;
+  renderVistaPedidoWeb();
+}
+
+function guardarPedidoWeb(entregado) {
+  const leido = pedidoWebLeido;
+  if (!leido) return;
+  const faltan = leido.lineas.filter(l => !l.productId);
+  if (faltan.length) return alert("Elegí a qué producto de tu lista corresponde: " + faltan.map(l => l.nombreWeb).join(", "));
+  const notasInput = document.getElementById("notasPedidoWeb");
+  const notas = notasInput ? notasInput.value.trim() : "";
+
+  // Ítems con los precios del mensaje (sin IVA). Si un producto viene dos
+  // veces, se junta en una sola línea.
+  const items = [];
+  leido.lineas.forEach(l => {
+    const prod = catalog.find(p => p.id === l.productId);
+    const existente = items.find(i => i.productId === prod.id);
+    if (existente) {
+      existente.cantidad += l.cantidad;
+      existente.subtotalSinIVA += l.subtotal;
+      existente.subtotalConIVA = priceWithIVA(existente.subtotalSinIVA);
+      existente.precioVentaSinIVA = existente.subtotalSinIVA / existente.cantidad;
+      existente.precioVentaConIVA = priceWithIVA(existente.precioVentaSinIVA);
+    } else {
+      const unit = l.cantidad ? l.subtotal / l.cantidad : 0;
+      items.push({
+        id: generarId(), productId: prod.id, nombre: prod.nombre, categoria: prod.categoria,
+        cantidad: l.cantidad, precioVentaSinIVA: unit, precioVentaConIVA: priceWithIVA(unit),
+        subtotalSinIVA: l.subtotal, subtotalConIVA: priceWithIVA(l.subtotal)
+      });
+    }
+  });
+
+  if (entregado) {
+    for (const it of items) {
+      const prod = catalog.find(p => p.id === it.productId);
+      if (prod && prod.stock < it.cantidad && !confirm(`Stock insuficiente para ${it.nombre}. Disponible: ${prod.stock}. ¿Confirmás igual?`)) return;
+    }
+  }
+
+  // Aprende los nombres de la web para la próxima vez.
+  const ahora = Date.now();
+  leido.lineas.forEach(l => {
+    const prod = catalog.find(p => p.id === l.productId);
+    const n = normalizarNombreWeb(l.nombreWeb);
+    if (prod && normalizarNombreWeb(prod.nombre) !== n && !(prod.aliasWeb || []).includes(n)) {
+      prod.aliasWeb = [...(prod.aliasWeb || []), n];
+      prod.actualizadoEn = ahora;
+    }
+  });
+
+  const cliente = asegurarClienteWeb();
+  if (entregado) aplicarStock(items, -1);
+  const [y, m, d] = fechaHoyLocal().split("-");
+  const pedido = {
+    id: generarId(), fecha: `${d}/${m}/${y}`, client: { ...cliente },
+    items, notas, modoPrecio: "sin", pagado: false, pagos: [],
+    borrador: !entregado, canal: "web", actualizadoEn: ahora,
+    totals: {
+      totalSinIVA: items.reduce((a, i) => a + i.subtotalSinIVA, 0),
+      totalConIVA: items.reduce((a, i) => a + i.subtotalConIVA, 0),
+      totalCantidad: items.reduce((a, i) => a + i.cantidad, 0)
+    }
+  };
+  orders.unshift(pedido);
+  guardarStorage();
+  pedidoWebLeido = null;
+  textoPedidoWeb = "";
+
+  if (entregado) {
+    pedidoRecienEntregadoId = pedido.id;
+    setVista("historial", CLIENTE_WEB_ID);
+    setTimeout(() => {
+      const card = document.getElementById("order-card-" + pedido.id);
+      if (card) card.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 80);
+  } else {
+    setVista("resumen");
+    setTimeout(() => document.getElementById("pedidosBorradorCard")?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+  }
+}
+
+function renderVistaPedidoWeb() {
+  const cont = document.getElementById("vista-contenido");
+  if (!cont) return;
+  const leido = pedidoWebLeido;
+  const esc = t => String(t || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+  let detalle = "";
+  if (leido) {
+    const totalItems = leido.lineas.reduce((a, l) => a + l.subtotal, 0);
+    const notasDefecto = [leido.nombre, leido.notas].filter(Boolean).join(" — ");
+    detalle = `
+    <div class="form-card">
+      <h3 class="section-title">Revisá el pedido</h3>
+      ${leido.lineas.map((l, idx) => {
+        const sugeridos = sugerenciasParaNombreWeb(l.nombreWeb);
+        const resto = catalogActivo().filter(p => !sugeridos.includes(p));
+        const opcion = p => `<option value="${p.id}" ${p.id === l.productId ? "selected" : ""}>${esc(p.nombre)} · ${esc(p.categoria)}</option>`;
+        return `
+        <div style="padding:10px 0; border-bottom:1px solid #e5e7eb;">
+          <div style="display:flex; justify-content:space-between; gap:8px;">
+            <div><strong>${l.cantidad}×</strong> ${esc(l.nombreWeb)}</div>
+            <strong>${formatCurrency(l.subtotal)}</strong>
+          </div>
+          <div class="muted" style="font-size:12px; margin:2px 0 6px;">${formatCurrency(l.cantidad ? l.subtotal / l.cantidad : 0)} c/u (sin IVA)</div>
+          <select onchange="elegirProductoWeb(${idx}, this.value)" style="width:100%; ${l.productId ? "" : "border:2px solid #f59e0b;"}">
+            <option value="">${l.productId ? "" : "⚠️ "}Elegí a qué producto de tu lista corresponde</option>
+            ${sugeridos.length ? `<optgroup label="Parecidos">${sugeridos.map(opcion).join("")}</optgroup><optgroup label="Todos">${resto.map(opcion).join("")}</optgroup>` : resto.map(opcion).join("")}
+          </select>
+          ${l.productId ? "" : `<div style="font-size:12px; color:#92400e; margin-top:4px;">La primera vez lo elegís vos; después se acuerda solo. Si no está en tu lista, cargalo antes en 📦 Stock → ➕ Nuevo.</div>`}
+        </div>`;
+      }).join("")}
+      <div class="stock-row" style="border-top:2px solid #e5e7eb; margin-top:4px; padding-top:10px;">
+        <strong>Total</strong>
+        <strong>${formatCurrency(totalItems)}</strong>
+      </div>
+      ${leido.totalMensaje != null && Math.abs(leido.totalMensaje - totalItems) > 0.5
+        ? `<p style="color:#dc2626; font-size:13px; margin:4px 0 0;">⚠️ El mensaje dice Total ${formatCurrency(leido.totalMensaje)}, pero los productos suman ${formatCurrency(totalItems)}. Revisalo.</p>` : ""}
+      <div class="form-group" style="margin-top:12px;">
+        <label>Notas (comprador y entrega)</label>
+        <textarea id="notasPedidoWeb" rows="2">${esc(notasDefecto)}</textarea>
+      </div>
+      <button class="btn-primary btn-full" onclick="guardarPedidoWeb(false)">📋 Guardar como pendiente de entrega</button>
+      <button class="btn-success btn-full" style="margin-top:8px;" onclick="guardarPedidoWeb(true)">✅ Ya lo entregué (descuenta stock)</button>
+    </div>`;
+  }
+
+  cont.innerHTML = `
+    <div class="page-header">
+      <button class="btn-back" onclick="setVista('clientes')">← Volver</button>
+      <h2 class="page-title2">🌐 Pedido web</h2>
+    </div>
+    <div class="form-card">
+      <p class="muted" style="margin:0 0 8px;">Copiá el mensaje del pedido de WhatsApp y pegalo acá.</p>
+      <textarea id="textoPedidoWeb" rows="7" placeholder="¡Hola Distribuidora Chaque! 👋 Quiero hacer este pedido:&#10;• 3x Producto — $72.000&#10;...">${esc(textoPedidoWeb)}</textarea>
+      <button class="btn-primary btn-full" style="margin-top:8px;" onclick="procesarMensajeWeb()">🔍 Leer mensaje</button>
+    </div>
+    ${detalle}
+  `;
+}
+
+// Resumen: lo vendido por la web en el mes, comparado con el reparto.
+function toggleVentaWeb() { ventaWebAbierto = !ventaWebAbierto; renderVistaResumen(); }
+
+function renderCardVentaWeb(mesSel, anioSel, mesNombre) {
+  const delMes = orders.filter(o => {
+    if (o.borrador || o.eliminado) return false;
+    const p = o.fecha.replace(/,.*/, "").split("/");
+    return parseInt(p[1]) === mesSel && parseInt(p[2]) === anioSel;
+  });
+  const web = delMes.filter(esPedidoWeb);
+  const totalWeb = web.reduce((a, o) => a + o.totals.totalSinIVA, 0);
+  const totalMes = delMes.reduce((a, o) => a + o.totals.totalSinIVA, 0);
+  const pct = totalMes > 0 ? Math.round((totalWeb / totalMes) * 100) : 0;
+  const pendientes = orders.filter(o => o.borrador && !o.eliminado && esPedidoWeb(o)).length;
+
+  let detalle = "";
+  if (ventaWebAbierto) {
+    const porProducto = {};
+    web.forEach(o => o.items.forEach(i => {
+      const { clave, nombre } = productoVendido(i);
+      if (!porProducto[clave]) porProducto[clave] = { nombre, cantidad: 0, total: 0 };
+      porProducto[clave].cantidad += i.cantidad;
+      porProducto[clave].total += i.subtotalSinIVA;
+    }));
+    const top = Object.values(porProducto).sort((a, b) => b.cantidad - a.cantidad).slice(0, 5);
+    detalle = `
+      <div class="stats-grid" style="margin-top:8px;">
+        <div class="stat-box"><div class="muted">Pedidos web</div><strong>${web.length}</strong></div>
+        <div class="stat-box"><div class="muted">Reparto</div><strong style="font-size:13px;">${formatCurrency(totalMes - totalWeb)}</strong></div>
+        <div class="stat-box"><div class="muted">Web del total</div><strong>${pct}%</strong></div>
+      </div>
+      ${pendientes ? `<p class="muted" style="margin:8px 0 0; font-size:13px;">📋 ${pendientes} pedido${pendientes === 1 ? "" : "s"} web pendiente${pendientes === 1 ? "" : "s"} de entregar (no cuentan hasta que los confirmes).</p>` : ""}
+      ${top.length ? `<div class="muted" style="margin:10px 0 4px;">Lo que más salió por la web:</div>` + top.map(t => `
+        <div class="stock-row">
+          <div><div class="stock-nombre">${t.nombre}</div><div class="muted">${formatCurrency(t.total)}</div></div>
+          <div class="ventas-cant">${t.cantidad} u</div>
+        </div>`).join("") : `<p class="muted" style="margin:8px 0 0;">Todavía no hay ventas web entregadas en ${mesNombre}.</p>`}
+      <button class="btn-primary btn-full" style="margin-top:10px;" onclick="abrirPedidoWeb()">🌐 Pegar pedido web</button>`;
+  }
+  return `
+    <div class="form-card">
+      <h3 class="section-title" style="cursor:pointer;" onclick="toggleVentaWeb()">🌐 Venta web de ${mesNombre} ${ventaWebAbierto ? "▲" : "▼"}</h3>
+      <div class="stock-row">
+        <strong>Vendido por la web</strong>
+        <strong style="color:#2563eb;">${formatCurrency(totalWeb)}</strong>
+      </div>
+      ${detalle}
+    </div>`;
+}
+
 // ── Vista: RESUMEN ────────────────────────────────────────────────────────────
 let fechaResumen = fechaHoyLocal();
 let mesResumen = claveMesActual();
@@ -4727,6 +5008,8 @@ function renderVistaResumen() {
 
     ${renderCardMonotributo(mesResumenSel, anioResumenSel, mesResumenCapital)}
 
+    ${renderCardVentaWeb(mesResumenSel, anioResumenSel, mesResumenCapital)}
+
     ${(() => {
       const gastosMes = inversiones.filter(i => {
         if (i.eliminado) return false;
@@ -4973,7 +5256,7 @@ function clientesQueComprenMarca(marca) {
     if (o.items.some(i => i.categoria === marca)) idsQueCompraron.add(o.client.id);
   });
   return clients
-    .filter(c => !c.eliminado && idsQueCompraron.has(c.id))
+    .filter(c => !c.eliminado && c.id !== CLIENTE_WEB_ID && idsQueCompraron.has(c.id))
     .sort((a, b) => a.nombre.localeCompare(b.nombre));
 }
 
