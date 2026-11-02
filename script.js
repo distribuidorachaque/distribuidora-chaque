@@ -742,10 +742,20 @@ function montoParaInput(n) {
 function priceWithIVA(p) { return Number(p || 0) * (1 + IVA_RATE); }
 
 // ── Navegación ───────────────────────────────────────────────────────────────
-let pedidoRecienEntregadoId = null; // para resaltar el pedido que se acaba de entregar
+let pedidoRecienEntregadoId = null; // para resaltar el pedido que se acaba de entregar (o guardar)
+let tituloBannerPedido = "✅ Pedido entregado";
 
 function setVista(vista, clienteId) {
-  if (vista !== "historial") pedidoRecienEntregadoId = null;
+  if (vista !== "historial") { pedidoRecienEntregadoId = null; tituloBannerPedido = "✅ Pedido entregado"; }
+  // Si estabas armando un pedido NUEVO y salís de la pantalla sin guardar,
+  // se guarda solo (así nunca se pierde). Si no lo querías, lo borrás
+  // después con 🗑️ y el stock vuelve.
+  if (vistaActual === "pedido" && vista !== "pedido" && !editingOrderId && currentItems.length > 0) {
+    const nombre = (clients.find(c => c.id === clienteActivoId) || {}).nombre || "";
+    if (crearPedidoDesdeActual(leerCamposPedido())) {
+      mostrarAvisoPedido(`💾 Guardé el pedido de ${nombre}. Si no lo querías, borralo desde sus pedidos (🗑️) y el stock vuelve.`);
+    }
+  }
   // Al salir de la pantalla de Clientes limpiamos el buscador, así cuando
   // volvés aparece vacío y listo para buscar otro cliente (no queda pegado
   // lo que habías buscado antes de irte a Resumen, Stock, etc.).
@@ -1479,41 +1489,95 @@ function promoverPotencial(clienteId) {
   }
 }
 
-function guardarPedido() {
+// Lee de la pantalla los datos del pedido que se está armando.
+function leerCamposPedido() {
+  const d = document.getElementById("fechaPedido");
+  let fecha = new Date().toLocaleString("es-AR");
+  if (d && d.value) { const [y, m, day] = d.value.split("-"); fecha = `${day}/${m}/${y}`; }
+  return {
+    fecha,
+    notas: (document.getElementById("notasPedido")?.value || "").trim(),
+    modoPrecio: document.getElementById("modoPrecio")?.value || "sin"
+  };
+}
+
+// Guarda el pedido nuevo que se está armando (igual que "Guardar pedido":
+// descuenta stock salvo que esté prendido "Ignorar stock"). Devuelve el id.
+function crearPedidoDesdeActual(campos) {
   const client = clients.find(c => c.id === clienteActivoId);
-  if (!client) return alert("No hay cliente seleccionado");
-  if (currentItems.length === 0) return alert("Agregá al menos un producto");
-
+  if (!client || currentItems.length === 0) return null;
   if (!modoBorrador) aplicarStock(currentItems, -1);
-  const tSin  = currentItems.reduce((a, i) => a + i.subtotalSinIVA, 0);
-  const tCon  = currentItems.reduce((a, i) => a + i.subtotalConIVA, 0);
-  const tCant = currentItems.reduce((a, i) => a + i.cantidad, 0);
-
-  orders.unshift({
-    id: generarId(), fecha: (() => {
-      const d = document.getElementById("fechaPedido");
-      if (d && d.value) {
-        const [y,m,day] = d.value.split("-");
-        return `${day}/${m}/${y}`;
-      }
-      return new Date().toLocaleString("es-AR");
-    })(), client,
+  const pedido = {
+    id: generarId(), fecha: campos.fecha, client,
     items: [...currentItems],
-    notas: document.getElementById("notasPedido").value.trim(),
-    modoPrecio: document.getElementById("modoPrecio").value,
+    notas: campos.notas,
+    modoPrecio: campos.modoPrecio,
     pagado: false,
     pagos: [],
     borrador: modoBorrador,
     actualizadoEn: Date.now(),
-    totals: { totalSinIVA: tSin, totalConIVA: tCon, totalCantidad: tCant }
-  });
-
+    totals: {
+      totalSinIVA: currentItems.reduce((a, i) => a + i.subtotalSinIVA, 0),
+      totalConIVA: currentItems.reduce((a, i) => a + i.subtotalConIVA, 0),
+      totalCantidad: currentItems.reduce((a, i) => a + i.cantidad, 0)
+    }
+  };
+  orders.unshift(pedido);
   if (!modoBorrador) promoverPotencial(client.id);
-
+  currentItems = [];
+  borrarPedidoEnCursoGuardado();
   guardarStorage();
-  currentItems   = [];
+  return pedido.id;
+}
+
+function guardarPedido() {
+  const client = clients.find(c => c.id === clienteActivoId);
+  if (!client) return alert("No hay cliente seleccionado");
+  if (currentItems.length === 0) return alert("Agregá al menos un producto");
+  crearPedidoDesdeActual(leerCamposPedido());
   editingOrderId = null;
   setVista("historial");
+}
+
+// ── Pedido a medio armar: que no se pierda si el celu cierra la app ────────
+// Al irte a otra app (por ejemplo WhatsApp) con un pedido nuevo sin guardar,
+// se anota en el dispositivo. Si el celu cerró la app mientras tanto, al
+// volver a abrirla se guarda ese pedido y te avisa.
+const PEDIDO_EN_CURSO_KEY = "alunexa_pedido_en_curso_v1";
+function borrarPedidoEnCursoGuardado() {
+  try { localStorage.removeItem(PEDIDO_EN_CURSO_KEY); } catch {}
+}
+function anotarPedidoEnCurso() {
+  if (vistaActual !== "pedido" || editingOrderId || currentItems.length === 0 || !clienteActivoId) return;
+  setItemSeguro(PEDIDO_EN_CURSO_KEY, JSON.stringify({
+    clienteActivoId, items: currentItems, modoBorrador, campos: leerCamposPedido()
+  }));
+}
+function recuperarPedidoEnCurso() {
+  let guardado = null;
+  try { guardado = JSON.parse(localStorage.getItem(PEDIDO_EN_CURSO_KEY) || "null"); } catch {}
+  if (!guardado || !Array.isArray(guardado.items) || guardado.items.length === 0) return;
+  const client = clients.find(c => c.id === guardado.clienteActivoId);
+  if (!client) { borrarPedidoEnCursoGuardado(); return; }
+  clienteActivoId = guardado.clienteActivoId;
+  currentItems = guardado.items;
+  modoBorrador = !!guardado.modoBorrador;
+  crearPedidoDesdeActual(guardado.campos || { fecha: new Date().toLocaleString("es-AR"), notas: "", modoPrecio: "sin" });
+  modoBorrador = false;
+  setTimeout(() => mostrarAvisoPedido(`💾 Guardé el pedido de ${client.nombre} que habías dejado a medias. Si no lo querías, borralo desde sus pedidos (🗑️).`), 1500);
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") anotarPedidoEnCurso();
+  else borrarPedidoEnCursoGuardado(); // la app siguió abierta: el pedido sigue en pantalla
+});
+window.addEventListener("pagehide", anotarPedidoEnCurso);
+
+function mostrarAvisoPedido(texto) {
+  const bar = document.getElementById("offline-bar");
+  if (!bar) return;
+  bar.textContent = texto;
+  bar.classList.add("offline-bar-visible", "offline-bar-ok");
+  setTimeout(() => bar.classList.remove("offline-bar-visible", "offline-bar-ok"), 7000);
 }
 
 function editarPedido(id) {
@@ -1624,9 +1688,10 @@ function cancelarEdicionPedido() {
   if (editingOrderId) {
     const order = orders.find(o => o.id === editingOrderId);
     if (order && !order.borrador) aplicarStock(order.items, -1);
+    currentItems   = [];
+    editingOrderId = null;
   }
-  currentItems   = [];
-  editingOrderId = null;
+  // Si era un pedido nuevo con productos, al salir se guarda solo (setVista).
   setVista("clientes");
 }
 
@@ -2297,7 +2362,24 @@ function enviarWhatsAppPedidoActual() {
   const msg = construirMensajeWhatsApp(pedido, modo);
   const tel = client.telefono ? client.telefono.replace(/\D/g, "") : "";
   const url = tel ? `https://wa.me/54${tel}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+  // WhatsApp se abre en el mismo toque (si no, el celu lo puede bloquear).
   window.open(url, "_blank");
+
+  // Si es un pedido nuevo, se guarda en el momento: al irte a WhatsApp el
+  // celu puede cerrar la app y se perdería. Te queda marcado en verde.
+  if (!editingOrderId) {
+    const id = crearPedidoDesdeActual(leerCamposPedido());
+    if (id) {
+      pedidoRecienEntregadoId = id;
+      tituloBannerPedido = "💾 Pedido guardado y enviado por WhatsApp";
+      setVista("historial", client.id);
+      tituloBannerPedido = "💾 Pedido guardado y enviado por WhatsApp";
+      setTimeout(() => {
+        const card = document.getElementById("order-card-" + id);
+        if (card) card.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 80);
+    }
+  }
 }
 
 function enviarWhatsAppPedidoGuardado(id) {
@@ -3973,7 +4055,7 @@ function renderVistaHistorial() {
 
     ${pedidoRecienEntregadoId && lista.some(o => o.id === pedidoRecienEntregadoId) ? `
     <div style="background:#dcfce7; border:1px solid #86efac; border-radius:12px; padding:12px 14px; margin-bottom:12px;">
-      <strong style="color:#065f46;">✅ Pedido entregado</strong>
+      <strong style="color:#065f46;">${tituloBannerPedido}</strong>
       <div style="font-size:14px; color:#065f46; margin-top:2px;">Elegí qué querés hacer en el pedido marcado en verde: cobrar, WhatsApp, PDF o remito.</div>
       <button class="btn-sm btn-outline" style="margin-top:8px;" onclick="setVista('resumen')">← Volver a pendientes</button>
     </div>` : ""}
@@ -6571,4 +6653,5 @@ function initBloqueo() {
 // ═══════════════════════════════════════════════════════════════
 initBloqueo();
 initOfflineIndicator();
+recuperarPedidoEnCurso();
 cargarDatos();
