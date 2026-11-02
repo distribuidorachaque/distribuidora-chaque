@@ -4784,9 +4784,23 @@ function toggleClientesHoy() {
   renderVistaResumen();
 }
 
+// Gráfico de ventas por mes: cuántos meses está corrido hacia atrás.
+let graficoMesesAtras = 0;
+function moverGraficoMeses(delta) {
+  graficoMesesAtras = Math.max(0, graficoMesesAtras + delta);
+  renderVistaResumen();
+}
+// Monto abreviado para que entre arriba de las barras: 1,2 M · 850 mil.
+function montoCorto(v) {
+  if (v >= 1000000) return (v / 1000000).toLocaleString("es-AR", { maximumFractionDigits: 1 }) + " M";
+  if (v >= 1000) return Math.round(v / 1000) + " mil";
+  return String(Math.round(v));
+}
+
 function cambiarMesResumen() {
   const input = document.getElementById("inputMesResumen");
   if (input) mesResumen = input.value;
+  graficoMesesAtras = 0;
   renderVistaResumen();
 }
 
@@ -4960,11 +4974,21 @@ function renderVistaResumen() {
       })()}
 
       ${(() => {
-        const serie = calcularVentasUltimosMeses(mesResumenSel, anioResumenSel, 6);
+        // 5 meses que terminan en el mes del resumen, corridos hacia atrás con
+        // las flechitas (graficoMesesAtras).
+        let mFin = mesResumenSel - graficoMesesAtras, aFin = anioResumenSel;
+        while (mFin <= 0) { mFin += 12; aFin -= 1; }
+        const serie = calcularVentasUltimosMeses(mFin, aFin, 5);
         const maxVal = Math.max(1, ...serie.map(s => s.total));
+        const rango = `${serie[0].nombreMes}${serie[0].anio !== aFin ? " " + serie[0].anio : ""} – ${serie[serie.length - 1].nombreMes} ${aFin}`;
+        const estiloFlecha = "border:1.5px solid #d1d5db; background:#fff; border-radius:8px; padding:2px 10px; font-size:16px; cursor:pointer;";
         return `
         <div style="margin-top:14px; border-top:1px solid #e5e7eb; padding-top:12px;">
-          <div class="muted" style="margin-bottom:8px;">📈 Ventas de los últimos 6 meses</div>
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; gap:6px;">
+            <button style="${estiloFlecha}" onclick="moverGraficoMeses(1)" aria-label="Meses anteriores">‹</button>
+            <span class="muted" style="font-size:13px; text-align:center;">📈 Ventas · ${rango}</span>
+            <button style="${estiloFlecha} ${graficoMesesAtras === 0 ? "visibility:hidden;" : ""}" onclick="moverGraficoMeses(-1)" aria-label="Meses siguientes">›</button>
+          </div>
           <div style="display:flex; align-items:flex-end; gap:8px; height:110px;">
             ${serie.map(s => {
               const esMesActual = s.mes === mesResumenSel && s.anio === anioResumenSel;
@@ -4974,7 +4998,7 @@ function renderVistaResumen() {
               const borde = esMesActual ? 'border:2px solid #1a1a2e;' : '';
               return `
               <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%;">
-                <div style="font-size:10px; color:#6b7280; margin-bottom:2px;">${s.total > 0 ? formatCurrency(s.total).replace("$", "").trim() : ""}</div>
+                <div style="font-size:10px; color:#6b7280; margin-bottom:2px; white-space:nowrap;">${s.total > 0 ? montoCorto(s.total) : ""}</div>
                 <div style="width:100%; max-width:34px; background:${color}; ${borde} border-radius:4px 4px 0 0; height:${Math.max(4, Math.round((s.total / maxVal) * 80))}px;"></div>
                 <div style="font-size:11px; color:#374151; margin-top:4px;">${s.nombreMes}</div>
               </div>
