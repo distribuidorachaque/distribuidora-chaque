@@ -2995,6 +2995,8 @@ function renderApp() {
     case "aviso-marca": renderVistaAvisoMarca();  break;
     case "mapa-rutas": renderVistaMapaRutas(); break;
     case "pedido-web": renderVistaPedidoWeb(); break;
+    case "ruta": renderVistaRuta(); break;
+    case "ordenar-clientes": renderVistaOrdenarClientes(); break;
   }
 }
 
@@ -3165,6 +3167,8 @@ function renderVistaClientes() {
           ? `<button class="tipo-tab" style="border-left:3px solid #16a34a;" onclick="setVista('potenciales')">🌱 Potenciales (${cantPotenciales})</button>`
           : "";
       })()}
+      <button class="tipo-tab" style="border-left:3px solid #2563eb;" onclick="abrirRuta()">🗓️ Ruta del día</button>
+      <button class="tipo-tab" style="border-left:3px solid #f59e0b;" onclick="abrirOrdenarClientes()">📋 Ordenar</button>
       <button class="tipo-tab" style="border-left:3px solid #7c3aed;" onclick="setVista('mapa-rutas')">🗺️ Mapa</button>
       ${contarClientesInactivos() > 0
         ? `<button class="tipo-tab" style="border-left:3px solid #dc2626;" onclick="setVista('inactivos')">⏰ Inactivos (${contarClientesInactivos()})</button>`
@@ -4848,6 +4852,301 @@ function renderCardVentaWeb(mesSel, anioSel, mesNombre) {
       </div>
       ${detalle}
     </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RUTA DEL DÍA y ORDENAR CLIENTES
+// ═══════════════════════════════════════════════════════════════
+// Cada cliente tiene día de visita, zona y frecuencia (7, 14 o 21 días). El
+// calendario es FIJO, no depende de si compró: un quincenal de los martes
+// toca un martes sí y otro no. Para saber cuál, se guarda "cicloInicio": el
+// lunes de una semana en la que le toca (se elige con "¿Cuándo le toca la
+// próxima? Esta semana / La que viene / En 2 semanas").
+const NOMBRES_DIA = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+let rutaFecha = null;          // "YYYY-MM-DD" del día que se está mirando
+let rutaZona = "Todas";
+let ordenarSoloFaltantes = true;
+let ordenarBusqueda = "";
+
+function fechaISO(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function fechaDesdeISO(s) {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+function lunesDe(fecha) {
+  const d = new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate());
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  return d;
+}
+function frecuenciaSemanas(c) {
+  const f = Number(c.frecuencia);
+  return f === 14 ? 2 : f === 21 ? 3 : 1; // sin dato = semanal, como siempre
+}
+function faltaElegirSemana(c) {
+  return frecuenciaSemanas(c) > 1 && !c.cicloInicio;
+}
+// ¿Le toca la semana de esta fecha?
+function leTocaSemana(c, fecha) {
+  const n = frecuenciaSemanas(c);
+  if (n === 1 || !c.cicloInicio) return true;
+  const semanas = Math.round((lunesDe(fecha) - fechaDesdeISO(c.cicloInicio)) / (7 * 86400000));
+  return ((semanas % n) + n) % n === 0;
+}
+// Lunes de la próxima semana (desde la de esta fecha) en la que le toca.
+function proximaSemanaQueToca(c, desde) {
+  const lunes = lunesDe(desde);
+  for (let k = 0; k < 4; k++) {
+    const d = new Date(lunes); d.setDate(d.getDate() + 7 * k);
+    if (leTocaSemana(c, d)) return d;
+  }
+  return lunes;
+}
+function fechaCorta(d) {
+  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+function textoFrecuencia(c) {
+  if (sinFrecuencia(c)) return "Sin frecuencia";
+  const n = frecuenciaSemanas(c);
+  return n === 2 ? "Cada 14 días" : n === 3 ? "Cada 21 días" : "Semanal";
+}
+function clientesDeRuta() {
+  return clients.filter(c => !c.eliminado && c.id !== CLIENTE_WEB_ID && (c.tipo || "Otro") !== "Otro");
+}
+
+// ── Ruta del día ─────────────────────────────────────────────────────────
+function abrirRuta() {
+  if (!rutaFecha) {
+    const hoy = new Date();
+    // Sábado o domingo: arranca en el lunes que viene.
+    if (hoy.getDay() === 6) hoy.setDate(hoy.getDate() + 2);
+    if (hoy.getDay() === 0) hoy.setDate(hoy.getDate() + 1);
+    rutaFecha = fechaISO(hoy);
+  }
+  setVista("ruta");
+}
+function elegirDiaRuta(iso) { rutaFecha = iso; renderVistaRuta(); }
+function moverSemanaRuta(delta) {
+  const d = fechaDesdeISO(rutaFecha); d.setDate(d.getDate() + 7 * delta);
+  rutaFecha = fechaISO(d); renderVistaRuta();
+}
+function elegirZonaRuta(z) { rutaZona = z; renderVistaRuta(); }
+function rutaVisitado(id) {
+  const c = clients.find(x => x.id === id);
+  if (!c) return;
+  c.ultimaVisita = fechaHoyLocal();
+  c.actualizadoEn = Date.now();
+  guardarStorage();
+  renderVistaRuta();
+}
+function rutaPedido(id) {
+  clienteActivoId = id;
+  irACargarPedido();
+}
+function rutaComoLlegar(id) {
+  clienteActivoId = id;
+  abrirMaps();
+}
+
+function renderVistaRuta() {
+  const cont = document.getElementById("vista-contenido");
+  if (!cont) return;
+  const fecha = fechaDesdeISO(rutaFecha);
+  const nombreDia = NOMBRES_DIA[fecha.getDay()];
+  const lunes = lunesDe(fecha);
+  const hoyISO = fechaHoyLocal();
+  const esHoy = rutaFecha === hoyISO;
+
+  const delDia = clientesDeRuta().filter(c => c.diaVisita === nombreDia && !sinFrecuencia(c));
+  const zonas = [...new Set(delDia.map(c => c.zona || "Sin zona"))].sort();
+  if (rutaZona !== "Todas" && !zonas.includes(rutaZona)) rutaZona = "Todas";
+  const enZona = delDia.filter(c => rutaZona === "Todas" || (c.zona || "Sin zona") === rutaZona);
+  const ordenar = (a, b) => (a.zona || "zzz").localeCompare(b.zona || "zzz") || a.nombre.localeCompare(b.nombre);
+  const tocan = enZona.filter(c => leTocaSemana(c, fecha)).sort(ordenar);
+  const noTocan = enZona.filter(c => !leTocaSemana(c, fecha)).sort(ordenar);
+  const sinDia = clientesDeRuta().filter(c => !c.diaVisita && !sinFrecuencia(c)).length;
+  const faltaSemana = clientesDeRuta().filter(c => c.diaVisita && faltaElegirSemana(c)).length;
+
+  const tabsDias = DIAS_VISITA.map((dia, i) => {
+    const d = new Date(lunes); d.setDate(d.getDate() + i);
+    const iso = fechaISO(d);
+    return `<button class="tipo-tab ${iso === rutaFecha ? "active" : ""}" onclick="elegirDiaRuta('${iso}')">${dia.slice(0, 3)} ${d.getDate()}</button>`;
+  }).join("");
+
+  const tarjeta = c => {
+    const dias = diasSinComprar(c.id);
+    const comproHoy = esHoy && orders.some(o => o.client.id === c.id && !o.eliminado && !o.borrador && fechaISO(fechaPedidoComoDate(o)) === hoyISO);
+    const visitadoHoy = esHoy && c.ultimaVisita === hoyISO;
+    const deuda = deudaTotalCliente(c.id);
+    return `
+      <div class="client-item" style="flex-direction:column; align-items:stretch; gap:6px; ${comproHoy || visitadoHoy ? "opacity:0.6;" : ""}">
+        <div style="display:flex; justify-content:space-between; gap:8px;">
+          <div>
+            <div class="client-name">${c.nombre}${comproHoy ? " ✅" : visitadoHoy ? " 👋" : ""}</div>
+            <div class="client-sub">${c.zona ? "📍 " + c.zona + " · " : ""}${textoFrecuencia(c)}${dias !== null ? " · última compra/visita hace " + dias + " día" + (dias === 1 ? "" : "s") : " · nunca compró"}</div>
+            ${faltaElegirSemana(c) ? `<div style="font-size:12px; color:#92400e;">⚠️ Falta elegir en qué semana le toca (📋 Ordenar clientes)</div>` : ""}
+          </div>
+          ${deuda > 0 ? `<span style="font-size:12px; color:#dc2626; white-space:nowrap;">💰 ${formatCurrency(deuda)}</span>` : ""}
+        </div>
+        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+          <button class="btn-sm btn-success" style="color:#fff;" onclick="rutaPedido('${c.id}')">📋 Pedido</button>
+          <button class="btn-sm btn-outline" onclick="rutaVisitado('${c.id}')">👋 Visitado</button>
+          ${c.telefono ? `<button class="btn-sm btn-outline" onclick="abrirWhatsAppCliente('${c.id}')">📱 WA</button>` : ""}
+          <button class="btn-sm btn-outline" onclick="rutaComoLlegar('${c.id}')">📍 Llegar</button>
+        </div>
+      </div>`;
+  };
+
+  cont.innerHTML = `
+    <div class="page-header">
+      <button class="btn-back" onclick="setVista('clientes')">← Volver</button>
+      <h2 class="page-title2">🗓️ Ruta del día</h2>
+    </div>
+
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+      <button class="btn-sm btn-outline" onclick="moverSemanaRuta(-1)">‹ Semana anterior</button>
+      <span class="muted" style="font-size:13px;">Semana del ${fechaCorta(lunes)}</span>
+      <button class="btn-sm btn-outline" onclick="moverSemanaRuta(1)">Siguiente ›</button>
+    </div>
+    <div class="tipo-tabs">${tabsDias}</div>
+    ${zonas.length > 1 ? `<div class="tipo-tabs">${["Todas", ...zonas].map(z => `<button class="tipo-tab ${rutaZona === z ? "active" : ""}" onclick="elegirZonaRuta('${z.replace(/'/g, "\\'")}')">${z === "Todas" ? "Todas las zonas" : "📍 " + z}</button>`).join("")}</div>` : ""}
+
+    <div class="form-card">
+      <h3 class="section-title">✅ Te tocan el ${nombreDia.toLowerCase()} ${fechaCorta(fecha)} (${tocan.length})</h3>
+      ${tocan.length ? tocan.map(tarjeta).join("") : `<p class="muted" style="margin:0;">No hay clientes para este día${rutaZona !== "Todas" ? " en esta zona" : ""}.</p>`}
+    </div>
+
+    ${noTocan.length ? `
+    <details class="form-card">
+      <summary style="cursor:pointer; font-weight:600;">⏳ No les toca esta semana (${noTocan.length})</summary>
+      ${noTocan.map(c => `
+        <div class="stock-row">
+          <div>
+            <div class="stock-nombre">${c.nombre}</div>
+            <div class="muted">${c.zona ? "📍 " + c.zona + " · " : ""}${textoFrecuencia(c)} · le toca la semana del ${fechaCorta(proximaSemanaQueToca(c, fecha))}</div>
+          </div>
+          <button class="btn-sm btn-outline" onclick="rutaPedido('${c.id}')">📋</button>
+        </div>`).join("")}
+    </details>` : ""}
+
+    ${sinDia || faltaSemana ? `
+    <div class="form-card" style="border-left:4px solid #f59e0b;">
+      <p style="margin:0 0 8px; font-size:14px;">
+        ${sinDia ? `⚠️ ${sinDia} cliente${sinDia === 1 ? "" : "s"} sin día de visita (no aparecen en ninguna ruta).<br>` : ""}
+        ${faltaSemana ? `⚠️ ${faltaSemana} cliente${faltaSemana === 1 ? "" : "s"} de 14 o 21 días sin semana elegida.` : ""}
+      </p>
+      <button class="btn-primary btn-full" onclick="setVista('ordenar-clientes')">📋 Ordenar clientes</button>
+    </div>` : ""}
+  `;
+}
+
+// ── Ordenar clientes ─────────────────────────────────────────────────────
+function abrirOrdenarClientes() {
+  ordenarBusqueda = "";
+  setVista("ordenar-clientes");
+}
+function leFaltaAlgo(c) {
+  return !c.diaVisita || !c.zona || faltaElegirSemana(c);
+}
+function cambiarClienteOrden(id, campo, valor) {
+  const c = clients.find(x => x.id === id);
+  if (!c) return;
+  if (campo === "frecuencia") {
+    c.frecuencia = valor === "0" ? 0 : Number(valor);
+    if (frecuenciaSemanas(c) === 1) delete c.cicloInicio;
+  } else if (campo === "semana") {
+    const l = lunesDe(new Date()); l.setDate(l.getDate() + 7 * Number(valor));
+    c.cicloInicio = fechaISO(l);
+  } else {
+    c[campo] = String(valor || "").trim();
+  }
+  c.actualizadoEn = Date.now();
+  guardarStorage();
+  const fila = document.getElementById("orden-" + id);
+  if (fila) fila.outerHTML = filaOrdenarCliente(c);
+}
+function filtrarOrdenar(valor) {
+  ordenarBusqueda = valor;
+  renderListaOrdenar();
+}
+function toggleSoloFaltantes() {
+  ordenarSoloFaltantes = !ordenarSoloFaltantes;
+  renderVistaOrdenarClientes();
+}
+
+function filaOrdenarCliente(c) {
+  const n = sinFrecuencia(c) ? 0 : frecuenciaSemanas(c);
+  const esc = t => String(t || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  let semana = "";
+  if (n > 1) {
+    const hoyLunes = lunesDe(new Date());
+    const prox = c.cicloInicio ? proximaSemanaQueToca(c, new Date()) : null;
+    const k = prox ? Math.round((prox - hoyLunes) / (7 * 86400000)) : -1;
+    const opciones = ["Esta semana", "La que viene", "En 2 semanas"].slice(0, n);
+    semana = `
+      <div style="margin-top:6px;">
+        <div style="font-size:12px; ${c.cicloInicio ? "color:#6b7280;" : "color:#92400e; font-weight:600;"}">${c.cicloInicio ? "¿Cuándo le toca la próxima?" : "⚠️ ¿Cuándo le toca la próxima?"}</div>
+        <div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:3px;">
+          ${opciones.map((t, i) => `<button class="tipo-tab ${k === i ? "active" : ""}" style="padding:4px 10px; font-size:13px;" onclick="cambiarClienteOrden('${c.id}', 'semana', ${i})">${t}</button>`).join("")}
+        </div>
+      </div>`;
+  }
+  return `
+    <div id="orden-${c.id}" style="padding:10px 0; border-bottom:1px solid #e5e7eb;">
+      <div style="font-weight:600;">${c.nombre} <span class="muted" style="font-weight:400; font-size:12px;">${c.tipo || ""}</span></div>
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-top:6px;">
+        <select onchange="cambiarClienteOrden('${c.id}', 'diaVisita', this.value)" style="${c.diaVisita ? "" : "border:2px solid #f59e0b;"}">
+          <option value="">Día…</option>
+          ${DIAS_VISITA.map(d => `<option value="${d}" ${c.diaVisita === d ? "selected" : ""}>${d}</option>`).join("")}
+        </select>
+        <select onchange="cambiarClienteOrden('${c.id}', 'frecuencia', this.value)">
+          <option value="7" ${n === 1 ? "selected" : ""}>Semanal</option>
+          <option value="14" ${n === 2 ? "selected" : ""}>Cada 14</option>
+          <option value="21" ${n === 3 ? "selected" : ""}>Cada 21</option>
+          <option value="0" ${n === 0 ? "selected" : ""}>Sin frec.</option>
+        </select>
+        <input list="listaZonasOrdenar" placeholder="Zona…" value="${esc(c.zona)}" onchange="cambiarClienteOrden('${c.id}', 'zona', this.value)" style="${c.zona ? "" : "border:2px solid #f59e0b;"}" />
+      </div>
+      ${semana}
+    </div>`;
+}
+
+function renderListaOrdenar() {
+  const caja = document.getElementById("listaOrdenar");
+  if (!caja) return;
+  const q = normalizarTextoBusqueda(ordenarBusqueda);
+  let lista = clientesDeRuta().filter(c => !c.potencial);
+  if (ordenarSoloFaltantes) lista = lista.filter(leFaltaAlgo);
+  if (q) lista = lista.filter(c => normalizarTextoBusqueda(c.nombre + " " + (c.zona || "")).includes(q));
+  lista.sort((a, b) => a.nombre.localeCompare(b.nombre));
+  caja.innerHTML = lista.length ? lista.map(filaOrdenarCliente).join("")
+    : `<p class="muted" style="margin:0;">${ordenarSoloFaltantes ? "🎉 Todos tus clientes tienen día, zona y semana. Tocá \"Ver todos\" si querés cambiar alguno." : "No hay clientes con ese nombre."}</p>`;
+}
+
+function renderVistaOrdenarClientes() {
+  const cont = document.getElementById("vista-contenido");
+  if (!cont) return;
+  const zonas = [...new Set(clients.filter(c => !c.eliminado).map(c => c.zona).filter(Boolean))].sort();
+  const faltan = clientesDeRuta().filter(c => !c.potencial && leFaltaAlgo(c)).length;
+  cont.innerHTML = `
+    <div class="page-header">
+      <button class="btn-back" onclick="setVista('clientes')">← Volver</button>
+      <h2 class="page-title2">📋 Ordenar clientes</h2>
+    </div>
+    <div class="form-card">
+      <p class="muted" style="margin:0 0 8px; font-size:13px;">Elegí día, frecuencia y zona de cada cliente. Se guarda solo al cambiarlo. A los de 14 o 21 días, tocá cuándo les toca la próxima.</p>
+      <div class="tipo-tabs" style="margin-bottom:8px;">
+        <button class="tipo-tab ${ordenarSoloFaltantes ? "active" : ""}" onclick="${ordenarSoloFaltantes ? "" : "toggleSoloFaltantes()"}">⚠️ Les falta algo (${faltan})</button>
+        <button class="tipo-tab ${ordenarSoloFaltantes ? "" : "active"}" onclick="${ordenarSoloFaltantes ? "toggleSoloFaltantes()" : ""}">Ver todos</button>
+      </div>
+      <input type="text" placeholder="🔍 Buscar cliente o zona" value="${ordenarBusqueda.replace(/"/g, "&quot;")}" oninput="filtrarOrdenar(this.value)" style="width:100%; box-sizing:border-box; margin-bottom:6px;" />
+      <datalist id="listaZonasOrdenar">${zonas.map(z => `<option value="${z.replace(/"/g, "&quot;")}">`).join("")}</datalist>
+      <div id="listaOrdenar"></div>
+      <button class="btn-primary btn-full" style="margin-top:12px;" onclick="abrirRuta()">🗓️ Ver la ruta del día</button>
+    </div>
+  `;
+  renderListaOrdenar();
 }
 
 // ── Vista: RESUMEN ────────────────────────────────────────────────────────────
