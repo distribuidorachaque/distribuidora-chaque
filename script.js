@@ -5319,6 +5319,29 @@ function mandarTextoFabricaWhatsApp() {
   window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
 }
 
+// Unidades vendidas por producto (este mes y el anterior) y reservadas en
+// pedidos pendientes, para decidir cuánto pedir sin salir del pedido.
+function ventasParaPedidoFabrica() {
+  const hoy = new Date();
+  const mesAct = hoy.getMonth() + 1, anioAct = hoy.getFullYear();
+  const mesAnt = mesAct === 1 ? 12 : mesAct - 1, anioAnt = mesAct === 1 ? anioAct - 1 : anioAct;
+  const r = {};
+  const fila = clave => r[clave] || (r[clave] = { esteMes: 0, mesPasado: 0, reservado: 0 });
+  orders.forEach(o => {
+    if (o.eliminado) return;
+    if (o.borrador) {
+      o.items.forEach(i => { fila(productoVendido(i).clave).reservado += i.cantidad; });
+      return;
+    }
+    const f = fechaPedidoComoDate(o);
+    const m = f.getMonth() + 1, a = f.getFullYear();
+    const campo = m === mesAct && a === anioAct ? "esteMes" : (m === mesAnt && a === anioAnt ? "mesPasado" : null);
+    if (!campo) return;
+    o.items.forEach(i => { fila(productoVendido(i).clave)[campo] += i.cantidad; });
+  });
+  return { r, nombreAct: MESES_ES[mesAct - 1], nombreAnt: MESES_ES[mesAnt - 1] };
+}
+
 function renderVistaPedidoFabrica() {
   const cont = document.getElementById("vista-contenido");
   if (!cont) return;
@@ -5328,6 +5351,11 @@ function renderVistaPedidoFabrica() {
   const productos = catalogActivo().filter(p => p.categoria === pedidoFabricaMarca);
   const esc = t => String(t || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
   const conPedido = m => Object.keys((leerPedidosFabrica()[m] || {}).cantidades || {}).length > 0;
+  const ventas = ventasParaPedidoFabrica();
+  const lineaVentas = p => {
+    const v = ventas.r[normalizarNombreProducto(p.nombre)] || { esteMes: 0, mesPasado: 0, reservado: 0 };
+    return `<div class="muted" style="font-size:12px; margin-top:2px;">📊 Vendidas: <strong>${v.esteMes}</strong> en ${ventas.nombreAct.toLowerCase()} · <strong>${v.mesPasado}</strong> en ${ventas.nombreAnt.toLowerCase()}${v.reservado ? ` · <span style="color:#92400e;">📋 ${v.reservado} reservadas en pendientes</span>` : ""}</div>`;
+  };
 
   cont.innerHTML = `
     <div class="page-header">
@@ -5345,6 +5373,7 @@ function renderVistaPedidoFabrica() {
             <div style="font-weight:600;">${codigoDeProducto(p) ? "#" + codigoDeProducto(p) + " · " : ""}${esc(p.nombre)}</div>
             <div class="muted" style="font-size:12px; white-space:nowrap;">Stock: ${p.stock}</div>
           </div>
+          ${lineaVentas(p)}
           <div style="display:grid; grid-template-columns:80px 1fr 1fr; gap:6px; align-items:center; margin-top:4px;">
             <input type="number" min="0" inputmode="numeric" placeholder="0" value="${pedido.cantidades[p.id] || ""}" oninput="cambiarCantidadFabrica('${p.id}', this.value)" style="text-align:center;" />
             <input type="text" inputmode="decimal" placeholder="Precio lista" value="${p.precioLista > 0 ? montoParaInput(p.precioLista).toLocaleString("es-AR") : ""}" onchange="cambiarPrecioListaFabrica('${p.id}', this.value)" />
