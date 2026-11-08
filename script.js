@@ -2708,6 +2708,12 @@ function guardarPrecio(id) {
     if (precioPublicoInput.value.trim() !== "" && pp > 0) prod.precioPublico = pp;
     else delete prod.precioPublico;
   }
+  const precioListaInput = document.getElementById("input-preciolista-" + id);
+  if (precioListaInput) {
+    const pl = parseNumber(precioListaInput.value);
+    if (precioListaInput.value.trim() !== "" && pl > 0) prod.precioLista = pl;
+    else delete prod.precioLista;
+  }
   prod.actualizadoEn = Date.now();
   guardarStorage();
   if (nuevaCategoria !== categoriaVieja) filtroStock = nuevaCategoria;
@@ -2777,7 +2783,7 @@ function textoUltimaCargaStock(p) {
   const diaCarga = new Date(f); diaCarga.setHours(0, 0, 0, 0);
   const dias = Math.round((hoy - diaCarga) / 86400000);
   const hora = f.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", hour12: false });
-  const cuando = dias === 0 ? `hoy ${hora}` : dias === 1 ? `ayer ${hora}` : f.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" }) + ` ${hora}`;
+  const cuando = dias === 0 ? `hoy ${hora}` : dias === 1 ? `ayer ${hora}` : `${String(f.getDate()).padStart(2, "0")}/${String(f.getMonth() + 1).padStart(2, "0")} ${hora}`;
   const color = dias === 0 ? "#059669" : "#6b7280";
   return `<div style="font-size:11px; color:${color}; margin-top:2px;">📦 Stock cargado: ${cuando}${p.stockCargadoDetalle ? ` (${p.stockCargadoDetalle})` : ""}</div>`;
 }
@@ -2997,6 +3003,7 @@ function renderApp() {
     case "pedido-web": renderVistaPedidoWeb(); break;
     case "ruta": renderVistaRuta(); break;
     case "ordenar-clientes": renderVistaOrdenarClientes(); break;
+    case "pedido-fabrica": renderVistaPedidoFabrica(); break;
   }
 }
 
@@ -5149,6 +5156,215 @@ function renderVistaOrdenarClientes() {
   renderListaOrdenar();
 }
 
+// ═══════════════════════════════════════════════════════════════
+// PEDIDO A FÁBRICA
+// ═══════════════════════════════════════════════════════════════
+// Se elige la marca, se cargan las cantidades a mano y se manda: como Excel
+// (menú Compartir del celu → WhatsApp, Gmail…) o como texto por WhatsApp.
+// El precio que va en el pedido es el "precio de lista de fábrica"
+// (precioLista), aparte del costo con descuento que usa la app para la
+// ganancia. Las cantidades quedan guardadas en el dispositivo hasta que se
+// vacía el pedido, así no se pierden si salís.
+let pedidoFabricaMarca = null;
+const PEDIDO_FABRICA_KEY = "alunexa_pedido_fabrica_v1";
+
+function leerPedidosFabrica() {
+  try { return JSON.parse(localStorage.getItem(PEDIDO_FABRICA_KEY) || "{}") || {}; } catch { return {}; }
+}
+function pedidoFabricaActual() {
+  const todos = leerPedidosFabrica();
+  return todos[pedidoFabricaMarca] || { cantidades: {}, notas: "" };
+}
+function guardarPedidoFabricaActual(p) {
+  const todos = leerPedidosFabrica();
+  todos[pedidoFabricaMarca] = p;
+  setItemSeguro(PEDIDO_FABRICA_KEY, JSON.stringify(todos));
+}
+
+function abrirPedidoFabrica() {
+  const marcas = [...new Set(catalogActivo().map(p => p.categoria))].sort();
+  pedidoFabricaMarca = filtroStock !== "Todas" && marcas.includes(filtroStock) ? filtroStock : marcas[0];
+  setVista("pedido-fabrica");
+}
+function elegirMarcaFabrica(m) {
+  pedidoFabricaMarca = m;
+  renderVistaPedidoFabrica();
+}
+function cambiarCantidadFabrica(id, valor) {
+  const p = pedidoFabricaActual();
+  const n = Math.max(0, parseInt(valor, 10) || 0);
+  if (n) p.cantidades[id] = n; else delete p.cantidades[id];
+  guardarPedidoFabricaActual(p);
+  actualizarTotalesFabrica();
+}
+function cambiarPrecioListaFabrica(id, valor) {
+  const prod = catalog.find(x => x.id === id);
+  if (!prod) return;
+  const v = parseNumber(valor);
+  if (String(valor).trim() !== "" && v > 0) prod.precioLista = v; else delete prod.precioLista;
+  prod.actualizadoEn = Date.now();
+  guardarStorage();
+  actualizarTotalesFabrica();
+}
+function cambiarNotasFabrica(valor) {
+  const p = pedidoFabricaActual();
+  p.notas = valor;
+  guardarPedidoFabricaActual(p);
+}
+function vaciarPedidoFabrica() {
+  if (!confirm(`¿Vaciás el pedido de ${pedidoFabricaMarca}?`)) return;
+  guardarPedidoFabricaActual({ cantidades: {}, notas: "" });
+  renderVistaPedidoFabrica();
+}
+
+// Líneas con cantidad > 0, en el orden de la lista (por código).
+function lineasPedidoFabrica() {
+  const p = pedidoFabricaActual();
+  return catalogActivo()
+    .filter(x => x.categoria === pedidoFabricaMarca && p.cantidades[x.id] > 0)
+    .map(x => ({ prod: x, cantidad: p.cantidades[x.id], precio: Number(x.precioLista) || 0 }));
+}
+function actualizarTotalesFabrica() {
+  const lineas = lineasPedidoFabrica();
+  lineas.forEach(l => {
+    const el = document.getElementById("subtotal-fab-" + l.prod.id);
+    if (el) el.textContent = l.precio ? formatCurrency(l.precio * l.cantidad) : "";
+  });
+  catalogActivo().filter(x => x.categoria === pedidoFabricaMarca && !lineas.some(l => l.prod.id === x.id)).forEach(x => {
+    const el = document.getElementById("subtotal-fab-" + x.id);
+    if (el) el.textContent = "";
+  });
+  const total = lineas.reduce((a, l) => a + l.precio * l.cantidad, 0);
+  const unidades = lineas.reduce((a, l) => a + l.cantidad, 0);
+  const caja = document.getElementById("totalFabrica");
+  if (caja) caja.innerHTML = `<strong>${unidades} unidad${unidades === 1 ? "" : "es"} · ${lineas.length} producto${lineas.length === 1 ? "" : "s"}</strong><strong>${formatCurrency(total)}</strong>`;
+  const sinPrecio = lineas.filter(l => !l.precio).length;
+  const aviso = document.getElementById("avisoFabricaSinPrecio");
+  if (aviso) aviso.textContent = sinPrecio ? `⚠️ ${sinPrecio} producto${sinPrecio === 1 ? "" : "s"} sin precio de lista: en el pedido van sin precio.` : "";
+}
+
+function textoFechaHoy() {
+  const [y, m, d] = fechaHoyLocal().split("-");
+  return `${d}/${m}/${y}`;
+}
+
+function armarExcelFabrica(lineas, notas) {
+  const filas = [
+    ["Pedido de Distribuidora Chaque"],
+    ["Marca", pedidoFabricaMarca],
+    ["Fecha", textoFechaHoy()],
+    [],
+    ["Código", "Producto", "Cantidad", "Precio de lista", "Subtotal"]
+  ];
+  const primera = filas.length + 1;
+  lineas.forEach(l => filas.push([codigoDeProducto(l.prod) || "", l.prod.nombre, l.cantidad, l.precio || null, l.precio ? l.precio * l.cantidad : null]));
+  const ultima = filas.length;
+  filas.push(["", "TOTAL", lineas.reduce((a, l) => a + l.cantidad, 0), null, null]);
+  if (notas) { filas.push([]); filas.push(["Notas", notas]); }
+  const ws = XLSX.utils.aoa_to_sheet(filas);
+  const filaTotal = ultima + 1;
+  ws["C" + filaTotal] = { t: "n", f: `SUM(C${primera}:C${ultima})`, v: lineas.reduce((a, l) => a + l.cantidad, 0) };
+  ws["E" + filaTotal] = { t: "n", f: `SUM(E${primera}:E${ultima})`, v: lineas.reduce((a, l) => a + l.precio * l.cantidad, 0) };
+  for (let r = primera; r <= filaTotal; r++) ["D", "E"].forEach(c => { if (ws[c + r] && ws[c + r].t === "n") ws[c + r].z = '"$" #,##0.00'; });
+  ws["!cols"] = [{ wch: 9 }, { wch: 34 }, { wch: 10 }, { wch: 16 }, { wch: 16 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Pedido");
+  return wb;
+}
+
+function cargarXLSX() {
+  return new Promise((resolve, reject) => {
+    if (window.XLSX) return resolve();
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+    s.onload = resolve;
+    s.onerror = () => reject(new Error("No se pudo cargar Excel"));
+    document.head.appendChild(s);
+  });
+}
+
+async function compartirExcelFabrica() {
+  const lineas = lineasPedidoFabrica();
+  if (!lineas.length) return alert("Cargá al menos una cantidad.");
+  try { await cargarXLSX(); } catch { return alert("No se pudo armar el Excel. Revisá la conexión a internet."); }
+  const notas = (pedidoFabricaActual().notas || "").trim();
+  const wb = armarExcelFabrica(lineas, notas);
+  const nombre = `Pedido_${pedidoFabricaMarca.replace(/[^\w]+/g, "_")}_${fechaHoyLocal()}.xlsx`;
+  const datos = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  const archivo = new File([datos], nombre, { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  // En el celu: menú Compartir con el archivo adjunto (WhatsApp, Gmail…).
+  if (navigator.canShare && navigator.canShare({ files: [archivo] })) {
+    try {
+      await navigator.share({ files: [archivo], title: `Pedido ${pedidoFabricaMarca}`, text: `Pedido de Distribuidora Chaque — ${pedidoFabricaMarca} — ${textoFechaHoy()}` });
+      return;
+    } catch (e) {
+      if (e && e.name === "AbortError") return; // cerraste el menú
+    }
+  }
+  // En la compu (o si el celu no deja compartir archivos): se descarga.
+  XLSX.writeFile(wb, nombre);
+  alert("📥 Se descargó el Excel del pedido. Adjuntalo en WhatsApp o en el mail a la fábrica.");
+}
+
+function mandarTextoFabricaWhatsApp() {
+  const lineas = lineasPedidoFabrica();
+  if (!lineas.length) return alert("Cargá al menos una cantidad.");
+  const notas = (pedidoFabricaActual().notas || "").trim();
+  const total = lineas.reduce((a, l) => a + l.precio * l.cantidad, 0);
+  let msg = `Hola! Pedido de Distribuidora Chaque — ${pedidoFabricaMarca} — ${textoFechaHoy()}\n\n`;
+  msg += lineas.map(l => `• ${l.cantidad} x ${l.prod.nombre}${l.precio ? " — " + formatCurrency(l.precio * l.cantidad) : ""}`).join("\n");
+  msg += `\n\nTotal: ${lineas.reduce((a, l) => a + l.cantidad, 0)} unidades${total ? " — " + formatCurrency(total) : ""}`;
+  if (notas) msg += `\n\n${notas}`;
+  msg += "\n\nGracias!";
+  window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
+}
+
+function renderVistaPedidoFabrica() {
+  const cont = document.getElementById("vista-contenido");
+  if (!cont) return;
+  const marcas = [...new Set(catalogActivo().map(p => p.categoria))].sort();
+  if (!marcas.includes(pedidoFabricaMarca)) pedidoFabricaMarca = marcas[0];
+  const pedido = pedidoFabricaActual();
+  const productos = catalogActivo().filter(p => p.categoria === pedidoFabricaMarca);
+  const esc = t => String(t || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  const conPedido = m => Object.keys((leerPedidosFabrica()[m] || {}).cantidades || {}).length > 0;
+
+  cont.innerHTML = `
+    <div class="page-header">
+      <button class="btn-back" onclick="abrirStock()">← Volver</button>
+      <h2 class="page-title2">🏭 Pedido a fábrica</h2>
+    </div>
+    <div class="tipo-tabs">
+      ${marcas.map(m => `<button class="tipo-tab ${m === pedidoFabricaMarca ? "active" : ""}" onclick="elegirMarcaFabrica('${m.replace(/'/g, "\\'")}')">${esc(m)}${conPedido(m) ? " •" : ""}</button>`).join("")}
+    </div>
+    <div class="form-card">
+      <p class="muted" style="margin:0 0 8px; font-size:13px;">Poné cuántas querés de cada uno. El precio es el <strong>de lista de fábrica</strong> (sin tu descuento); si lo cambiás acá, queda guardado en el producto.</p>
+      ${productos.map(p => `
+        <div style="padding:8px 0; border-bottom:1px solid #e5e7eb;">
+          <div style="display:flex; justify-content:space-between; gap:8px;">
+            <div style="font-weight:600;">${codigoDeProducto(p) ? "#" + codigoDeProducto(p) + " · " : ""}${esc(p.nombre)}</div>
+            <div class="muted" style="font-size:12px; white-space:nowrap;">Stock: ${p.stock}</div>
+          </div>
+          <div style="display:grid; grid-template-columns:80px 1fr 1fr; gap:6px; align-items:center; margin-top:4px;">
+            <input type="number" min="0" inputmode="numeric" placeholder="0" value="${pedido.cantidades[p.id] || ""}" oninput="cambiarCantidadFabrica('${p.id}', this.value)" style="text-align:center;" />
+            <input type="text" inputmode="decimal" placeholder="Precio lista" value="${p.precioLista > 0 ? montoParaInput(p.precioLista).toLocaleString("es-AR") : ""}" onchange="cambiarPrecioListaFabrica('${p.id}', this.value)" />
+            <div id="subtotal-fab-${p.id}" style="text-align:right; font-weight:600;"></div>
+          </div>
+        </div>`).join("")}
+      <div id="totalFabrica" class="stock-row" style="border-top:2px solid #e5e7eb; margin-top:4px; padding-top:10px;"></div>
+      <p id="avisoFabricaSinPrecio" style="margin:4px 0 0; font-size:12px; color:#92400e;"></p>
+      <div class="form-group" style="margin-top:10px;">
+        <label>Notas para la fábrica (opcional)</label>
+        <textarea rows="2" placeholder="Ej: lo retiro el jueves" oninput="cambiarNotasFabrica(this.value)">${esc(pedido.notas)}</textarea>
+      </div>
+      <button class="btn-primary btn-full" onclick="compartirExcelFabrica()">📤 Mandar Excel (WhatsApp, Gmail…)</button>
+      <button class="btn-whatsapp btn-full" style="margin-top:8px;" onclick="mandarTextoFabricaWhatsApp()">📱 Mandar como texto por WhatsApp</button>
+      <button class="btn-gray btn-full" style="margin-top:8px;" onclick="vaciarPedidoFabrica()">🗑️ Vaciar pedido</button>
+    </div>
+  `;
+  actualizarTotalesFabrica();
+}
+
 // ── Vista: RESUMEN ────────────────────────────────────────────────────────────
 let fechaResumen = fechaHoyLocal();
 let mesResumen = claveMesActual();
@@ -6083,6 +6299,7 @@ function renderVistaStock() {
         <button class="tipo-tab ${filtroStock === c ? 'active' : ''}" onclick="filtrarStock('${c}')">${c}</button>
       `).join("")}
     </div>
+    <button class="btn-outline btn-full" style="margin-bottom:12px;" onclick="abrirPedidoFabrica()">🏭 Hacer pedido a fábrica${filtroStock !== "Todas" ? " — " + filtroStock : ""}</button>
 
     <div class="form-card">
       <h3 class="section-title">Actualizar stock</h3>
@@ -6151,6 +6368,10 @@ function renderVistaStock() {
               <div class="form-group" style="margin:8px 0 0;">
                 <label>Precio público (s/IVA, para clientes Otro)</label>
                 <input id="input-preciopublico-${p.id}" type="text" inputmode="decimal" placeholder="Sin cargar" value="${p.precioPublico > 0 ? p.precioPublico : ''}" />
+              </div>
+              <div class="form-group" style="margin:8px 0 0;">
+                <label>Precio de lista de fábrica (sin tu descuento, va en el pedido a fábrica)</label>
+                <input id="input-preciolista-${p.id}" type="text" inputmode="decimal" placeholder="Sin cargar" value="${p.precioLista > 0 ? montoParaInput(p.precioLista) : ''}" />
               </div>
               <div class="form-group" style="margin:8px 0 0;">
                 <label>Costo (lo que pagás vos, o le corresponde al proveedor)</label>
