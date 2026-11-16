@@ -1356,8 +1356,8 @@ function getDisponibleParaAgregar(productId) {
   // (todavía no descontaron stock de verdad, pero ya no está disponible
   // para ofrecerle a otro cliente el mismo día).
   const reservadoEnBorradores = orders
-    .filter(o => o.borrador && !o.eliminado && o.id !== editingOrderId)
-    .reduce((acc, o) => acc + o.items.filter(i => i.productId === productId).reduce((a, i) => a + i.cantidad, 0), 0);
+    .filter(o => !o.eliminado && o.id !== editingOrderId)
+    .reduce((acc, o) => acc + o.items.filter(i => i.productId === productId && (o.borrador || i.pendiente)).reduce((a, i) => a + i.cantidad, 0), 0);
   return prod.stock - usadoEnPedidoActual - reservadoEnBorradores;
 }
 
@@ -1440,8 +1440,35 @@ function eliminarItem(id) {
   renderPedido();
 }
 
+function toggleFaltaItem(id) {
+  const item = currentItems.find(i => i.id === id);
+  if (!item) return;
+  if (item.pendiente) delete item.pendiente; else item.pendiente = true;
+  renderPedido();
+}
+
+// Entrega lo que faltaba de un pedido (un producto o todos los que faltan).
+// Si el pedido ya estaba entregado, recién ahora se descuenta del stock.
+function entregarFaltante(orderId, itemId) {
+  const order = orders.find(o => o.id === orderId);
+  if (!order) return;
+  const items = order.items.filter(i => i.pendiente && (!itemId || i.id === itemId));
+  if (!items.length) return;
+  if (!confirm(`¿Entregaste ${items.map(i => i.cantidad + "× " + i.nombre).join(", ")} a ${order.client.nombre}?`)) return;
+  items.forEach(i => delete i.pendiente);
+  if (!order.borrador) aplicarStock(items, -1);
+  order.actualizadoEn = Date.now();
+  guardarStorage();
+  if (vistaActual === "historial") renderVistaHistorial();
+  else if (vistaActual === "resumen") renderVistaResumen();
+  else renderApp();
+}
+
+// Mueve el stock de los productos de un pedido. Los marcados "⏳ Falta"
+// (item.pendiente) no se tocan: se descuentan recién cuando se entregan.
 function aplicarStock(items, signo) {
   items.forEach(item => {
+    if (item.pendiente) return;
     const prod = catalog.find(p => p.id === item.productId);
     if (prod) {
       prod.stock += signo * item.cantidad;
@@ -1464,7 +1491,11 @@ function renderPedido() {
           : `<small>s/${formatCurrency(item.subtotalSinIVA)}<br>c/${formatCurrency(item.subtotalConIVA)}</small>`;
         return `
           <tr>
-            <td>${item.nombre}</td>
+            <td>${item.nombre}
+              <label style="display:flex; align-items:center; gap:4px; font-size:12px; margin-top:3px; color:${item.pendiente ? "#92400e" : "#6b7280"}; cursor:pointer;">
+                <input type="checkbox" ${item.pendiente ? "checked" : ""} onchange="toggleFaltaItem('${item.id}')" style="width:auto; margin:0;" /> ⏳ Falta entregar
+              </label>
+            </td>
             <td><input type="number" min="1" value="${item.cantidad}" onchange="actualizarCantidadItem('${item.id}', this.value)" style="width:55px;" /></td>
             <td>${precio}</td>
             <td><button class="btn-danger btn-sm" onclick="eliminarItem('${item.id}')">✕</button></td>
@@ -2336,9 +2367,9 @@ function construirMensajeWhatsApp(order, modo) {
     const subtotal   = modo === "con" ? i.subtotalConIVA    : i.subtotalSinIVA;
     const esBlister12 = BLISTER_12.includes(i.nombre) && i.categoria === "Vita";
     if (esBlister12) {
-      msg += `▪️ ${i.nombre}\n   ${i.cantidad} u x ${formatCurrency(precioUnit)} = ${formatCurrency(precioUnit / 12)} c/u\n`;
+      msg += `▪️ ${i.nombre}${i.pendiente ? " ⏳ (te lo llevo después)" : ""}\n   ${i.cantidad} u x ${formatCurrency(precioUnit)} = ${formatCurrency(precioUnit / 12)} c/u\n`;
     } else {
-      msg += `▪️ ${i.nombre}\n   ${i.cantidad} u x ${formatCurrency(precioUnit)} = ${formatCurrency(subtotal)}\n`;
+      msg += `▪️ ${i.nombre}${i.pendiente ? " ⏳ (te lo llevo después)" : ""}\n   ${i.cantidad} u x ${formatCurrency(precioUnit)} = ${formatCurrency(subtotal)}\n`;
     }
   });
   const total = modo === "con" ? order.totals.totalConIVA : order.totals.totalSinIVA;
@@ -2409,9 +2440,9 @@ function construirMensajeVentaCobrada(order, modo) {
     const subtotal   = modo === "con" ? i.subtotalConIVA    : i.subtotalSinIVA;
     const esBlister12 = BLISTER_12.includes(i.nombre) && i.categoria === "Vita";
     if (esBlister12) {
-      msg += `▪️ ${i.nombre}\n   ${i.cantidad} u x ${formatCurrency(precioUnit)} = ${formatCurrency(precioUnit / 12)} c/u\n`;
+      msg += `▪️ ${i.nombre}${i.pendiente ? " ⏳ (te lo llevo después)" : ""}\n   ${i.cantidad} u x ${formatCurrency(precioUnit)} = ${formatCurrency(precioUnit / 12)} c/u\n`;
     } else {
-      msg += `▪️ ${i.nombre}\n   ${i.cantidad} u x ${formatCurrency(precioUnit)} = ${formatCurrency(subtotal)}\n`;
+      msg += `▪️ ${i.nombre}${i.pendiente ? " ⏳ (te lo llevo después)" : ""}\n   ${i.cantidad} u x ${formatCurrency(precioUnit)} = ${formatCurrency(subtotal)}\n`;
     }
   });
   const total = modo === "con" ? order.totals.totalConIVA : order.totals.totalSinIVA;
@@ -2524,7 +2555,7 @@ function imprimirRemito(id) {
     const precio = modo === "con" ? i.precioVentaConIVA : i.precioVentaSinIVA;
     const subtotal = modo === "con" ? i.subtotalConIVA : i.subtotalSinIVA;
     const esBlister12 = BLISTER_12.includes(i.nombre) && i.categoria === "Vita";
-    lineas.push(`${i.cantidad} x ${i.nombre}`);
+    lineas.push(`${i.cantidad} x ${i.nombre}${i.pendiente ? " (PENDIENTE)" : ""}`);
     if (esBlister12) {
       lineas.push(`   ${formatCurrency(precio)} la caja = ${formatCurrency(precio / 12)} c/u`);
     } else {
@@ -3953,7 +3984,9 @@ function renderOrderCard(order) {
       </div>` : ''}
 
     <div class="order-items">
-      ${order.items.map(i => `<span class="order-item-tag">${i.cantidad}× ${i.nombre}</span>`).join("")}
+      ${order.items.map(i => i.pendiente
+        ? `<span class="order-item-tag" style="background:#fef3c7; color:#92400e;">⏳ ${i.cantidad}× ${i.nombre} (falta)</span>`
+        : `<span class="order-item-tag">${i.cantidad}× ${i.nombre}</span>`).join("")}
     </div>
     ${order.notas ? `<div class="order-nota">📝 ${order.notas}</div>` : ""}
 
@@ -3974,6 +4007,8 @@ function renderOrderCard(order) {
         </div>
       </div>` : ''}
 
+    ${order.items.some(i => i.pendiente) ? `
+      <button class="btn-sm btn-outline" style="border-color:#f59e0b; color:#92400e; margin:6px 0;" onclick="entregarFaltante('${order.id}')">✅ Entregué lo que faltaba</button>` : ""}
     <div class="order-actions">
       ${order.borrador ? `
         <button class="btn-sm btn-confirmar" onclick="confirmarEntrega('${order.id}')">🚚 Confirmar entrega</button>
@@ -5333,11 +5368,12 @@ function ventasParaPedidoFabrica() {
       o.items.forEach(i => { fila(productoVendido(i).clave).reservado += i.cantidad; });
       return;
     }
+    o.items.filter(i => i.pendiente).forEach(i => { fila(productoVendido(i).clave).reservado += i.cantidad; });
     const f = fechaPedidoComoDate(o);
     const m = f.getMonth() + 1, a = f.getFullYear();
     const campo = m === mesAct && a === anioAct ? "esteMes" : (m === mesAnt && a === anioAnt ? "mesPasado" : null);
     if (!campo) return;
-    o.items.forEach(i => { fila(productoVendido(i).clave)[campo] += i.cantidad; });
+    o.items.filter(i => !i.pendiente).forEach(i => { fila(productoVendido(i).clave)[campo] += i.cantidad; });
   });
   return { r, nombreAct: MESES_ES[mesAct - 1], nombreAnt: MESES_ES[mesAnt - 1] };
 }
@@ -5686,6 +5722,24 @@ function renderVistaResumen() {
         </div>
       `).join("")}
     </div>` : ""}
+
+    ${(() => {
+      const conFaltantes = orders.filter(o => !o.eliminado && !o.borrador && o.items.some(i => i.pendiente));
+      if (!conFaltantes.length) return "";
+      return `
+      <div class="form-card" style="border-left:4px solid #f59e0b;">
+        <h3 class="section-title">⏳ Falta entregar (${conFaltantes.length})</h3>
+        <p class="muted" style="margin:0 0 8px; font-size:13px;">Pedidos entregados a los que les faltó algo. Cuando lo lleves, tocá ✅ Entregado y se descuenta del stock.</p>
+        ${conFaltantes.map(o => o.items.filter(i => i.pendiente).map(i => `
+          <div class="stock-row">
+            <div style="cursor:pointer;" onclick="clienteActivoId='${o.client.id}'; setVista('historial', '${o.client.id}')">
+              <div class="stock-nombre">${o.client.nombre}</div>
+              <div class="muted">${i.cantidad}× ${i.nombre} · pedido del ${String(o.fecha).replace(/,.*/, "")}</div>
+            </div>
+            <button class="btn-sm btn-success" style="color:#fff;" onclick="entregarFaltante('${o.id}', '${i.id}')">✅ Entregado</button>
+          </div>`).join("")).join("")}
+      </div>`;
+    })()}
 
     ${renderCardMonotributo(mesResumenSel, anioResumenSel, mesResumenCapital)}
 
