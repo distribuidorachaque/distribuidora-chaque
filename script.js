@@ -3035,6 +3035,7 @@ function renderApp() {
     case "ruta": renderVistaRuta(); break;
     case "ordenar-clientes": renderVistaOrdenarClientes(); break;
     case "pedido-fabrica": renderVistaPedidoFabrica(); break;
+    case "revisar-stock": renderVistaRevisarStock(); break;
   }
 }
 
@@ -5430,6 +5431,105 @@ function renderVistaPedidoFabrica() {
   actualizarTotalesFabrica();
 }
 
+// ── Revisar movimientos de stock de un producto (solo muestra, no cambia) ──
+// Reconstruye, con los pedidos guardados, qué pasó con el stock de un
+// producto desde el último ajuste a mano: qué ventas descontaron, cuáles no
+// (y por qué), cuánto debería quedar, y a qué producto está atado cada
+// nombre de la página web.
+let revisarStockId = null;
+
+function abrirRevisarStock(id) {
+  revisarStockId = id;
+  setVista("revisar-stock");
+}
+
+function renderVistaRevisarStock() {
+  const cont = document.getElementById("vista-contenido");
+  if (!cont) return;
+  const prod = catalog.find(p => p.id === revisarStockId);
+  if (!prod) { setVista("stock"); return; }
+  const esc = t => String(t || "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  const n = normalizarNombreProducto(prod.nombre);
+  const desde = prod.stockCargadoEn ? new Date(prod.stockCargadoEn) : null;
+  const desdeDia = desde ? new Date(desde.getFullYear(), desde.getMonth(), desde.getDate()) : null;
+
+  // Pedidos que tienen este producto (por código interno o por nombre).
+  const movs = [];
+  orders.forEach(o => {
+    (o.items || []).forEach(i => {
+      const delProducto = i.productId === prod.id || normalizarNombreProducto(i.nombre) === n;
+      if (!delProducto) return;
+      const f = fechaPedidoComoDate(o);
+      if (desdeDia && f < desdeDia) return;
+      const otro = i.productId && i.productId !== prod.id ? catalog.find(p => p.id === i.productId) : null;
+      let estado, desconto = false, cuenta = false;
+      if (o.eliminado) estado = "🗑️ pedido borrado";
+      else if (o.borrador) { estado = "📋 pendiente de entrega (todavía no descuenta)"; }
+      else if (i.pendiente) { estado = "⏳ falta entregar (todavía no descuenta)"; }
+      else if (i.productId === prod.id) { estado = "✅ descontó stock"; desconto = true; cuenta = true; }
+      else if (otro) { estado = `⚠️ NO descontó: está atado a "${otro.nombre}"${otro.eliminado ? " (eliminado)" : ""}`; cuenta = true; }
+      else { estado = "⚠️ NO descontó: atado a un producto que ya no existe"; cuenta = true; }
+      movs.push({ o, i, f, estado, desconto, cuenta });
+    });
+  });
+  movs.sort((a, b) => b.f - a.f);
+  const vendidas = movs.filter(m => m.cuenta).reduce((a, m) => a + m.i.cantidad, 0);
+  const noDescontadas = movs.filter(m => m.cuenta && !m.desconto).reduce((a, m) => a + m.i.cantidad, 0);
+  const fijado = /^fijado en (\d+)/.exec(prod.stockCargadoDetalle || "");
+  const sumado = /^\+(\d+)/.exec(prod.stockCargadoDetalle || "");
+
+  // Nombres de la web atados a este producto, y nombres web parecidos atados a otro.
+  const palabra = n.split(" ").filter(w => w.length > 3).sort((a, b) => b.length - a.length)[0] || n;
+  const aliasPropios = prod.aliasWeb || [];
+  const aliasAjenos = [];
+  catalog.forEach(p => {
+    if (p.id === prod.id) return;
+    (p.aliasWeb || []).forEach(a => { if (a.includes(palabra)) aliasAjenos.push({ alias: a, prod: p }); });
+  });
+  const mismos = catalog.filter(p => p.id !== prod.id && normalizarNombreProducto(p.nombre) === n);
+
+  cont.innerHTML = `
+    <div class="page-header">
+      <button class="btn-back" onclick="abrirStock()">← Volver</button>
+      <h2 class="page-title2">🔍 ${esc(prod.nombre)}</h2>
+    </div>
+    <div class="form-card">
+      <div class="stock-row"><strong>Stock en la app</strong><strong>${prod.stock}</strong></div>
+      <div class="stock-row"><span>Último ajuste a mano</span><span>${desde ? `${String(desde.getDate()).padStart(2, "0")}/${String(desde.getMonth() + 1).padStart(2, "0")}/${desde.getFullYear()} ${desde.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", hour12: false })} (${esc(prod.stockCargadoDetalle || "")})` : "No hay registro"}</span></div>
+      <div class="stock-row"><span>Vendidas y entregadas desde ${desde ? "ese ajuste" : "siempre"}</span><strong>${vendidas}</strong></div>
+      ${noDescontadas ? `<div class="stock-row" style="color:#dc2626;"><strong>⚠️ De esas, NO descontaron stock</strong><strong>${noDescontadas}</strong></div>` : ""}
+      ${fijado ? `<p style="margin:8px 0 0; font-size:14px;">Fijaste el stock en <strong>${fijado[1]}</strong> y desde entonces se entregaron <strong>${vendidas}</strong>: deberían quedar <strong>${Math.max(0, fijado[1] - vendidas)}</strong>${Number(fijado[1]) - vendidas !== prod.stock ? ` — <span style="color:#dc2626;">la app dice ${prod.stock}</span>` : " ✅ (coincide con la app)"}.</p>`
+        : sumado ? `<p class="muted" style="margin:8px 0 0; font-size:13px;">El último ajuste fue sumar ${sumado[1]}; para saber cuánto debería haber, conviene fijar el stock contando las cajas y revisar de nuevo más adelante.</p>`
+        : `<p class="muted" style="margin:8px 0 0; font-size:13px;">No hay un ajuste a mano registrado. Contá las cajas, usá "= Fijar stock" y desde ahí esta pantalla te muestra todo.</p>`}
+    </div>
+
+    <div class="form-card">
+      <h3 class="section-title">🌐 Nombres de la página web</h3>
+      ${aliasPropios.length ? aliasPropios.map(a => `<div class="stock-row"><span>"${esc(a)}"</span><span style="color:#059669;">✅ atado a este producto</span></div>`).join("") : `<p class="muted" style="margin:0;">Ningún nombre de la web está atado a este producto.</p>`}
+      ${aliasAjenos.map(x => `<div class="stock-row" style="color:#dc2626;"><span>"${esc(x.alias)}"</span><span>⚠️ atado a "${esc(x.prod.nombre)}"${x.prod.eliminado ? " (eliminado)" : ""}</span></div>`).join("")}
+      ${aliasAjenos.length ? `<p style="margin:8px 0 0; font-size:13px; color:#dc2626;">Las ventas web con ese nombre le descuentan a otro producto, no a ${esc(prod.nombre)}.</p>` : ""}
+    </div>
+
+    ${mismos.length ? `
+    <div class="form-card" style="border-left:4px solid #dc2626;">
+      <h3 class="section-title">⚠️ Hay otro producto con el mismo nombre</h3>
+      ${mismos.map(p => `<div class="stock-row"><span>${esc(p.nombre)} · ${esc(p.categoria)}${p.eliminado ? " (eliminado)" : ""}</span><span>stock ${p.stock}</span></div>`).join("")}
+    </div>` : ""}
+
+    <div class="form-card">
+      <h3 class="section-title">📜 Movimientos ${desde ? "desde el último ajuste" : ""} (${movs.length})</h3>
+      ${movs.length ? movs.map(m => `
+        <div class="stock-row" style="align-items:flex-start;">
+          <div>
+            <div class="stock-nombre">${esc(m.o.client.nombre)}${esPedidoWeb(m.o) ? " 🌐" : ""}</div>
+            <div class="muted" style="font-size:12px;">${String(m.o.fecha).replace(/,.*/, "")} · ${m.estado}</div>
+          </div>
+          <strong>${m.i.cantidad}</strong>
+        </div>`).join("") : `<p class="muted" style="margin:0;">No hay pedidos con este producto ${desde ? "desde el último ajuste" : ""}.</p>`}
+    </div>
+  `;
+}
+
 // ── Vista: RESUMEN ────────────────────────────────────────────────────────────
 let fechaResumen = fechaHoyLocal();
 let mesResumen = claveMesActual();
@@ -6468,6 +6568,7 @@ function renderVistaStock() {
                 <button class="btn-success" onclick="guardarPrecio('${p.id}')">Guardar</button>
                 <button class="btn-outline" style="color:#dc2626;" onclick="eliminarProducto('${p.id}')">🗑️ Eliminar</button>
               </div>
+              <button class="btn-outline btn-full" style="margin-top:8px;" onclick="abrirRevisarStock('${p.id}')">🔍 Revisar movimientos de stock</button>
               <details style="margin-top:10px;">
                 <summary style="cursor:pointer; font-size:13px; color:#2563eb;">🔀 ¿Está repetido? Unificar con otro producto</summary>
                 <p class="muted" style="font-size:12px; margin:6px 0;">Elegí el repetido: su stock se suma a "${p.nombre}", sus ventas pasan a este y el repetido se elimina.</p>
