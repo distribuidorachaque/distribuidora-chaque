@@ -7203,4 +7203,8 @@ function initBloqueo() {
 initBloqueo();
 initOfflineIndicator();
 recuperarPedidoEnCurso();
+// La pantalla se dibuja YA con los datos guardados en el celu; después
+// cargarDatos trae lo nuevo de Google y la vuelve a dibujar. Antes no se veía
+// nada hasta que Google contestaba (a veces varios segundos).
+renderApp();
 cargarDatos();

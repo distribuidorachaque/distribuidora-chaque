@@ -18,8 +18,8 @@
 <body>
   <div id="app"></div>
 
-  <!-- Librería para exportar a Excel (usada en generarExcel) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- La librería de Excel ya no se carga al abrir (pesa casi 1 MB y frenaba
+       la apertura): se baja sola recién cuando se exporta un Excel. -->
 
   <script src="script.js" defer></script>
 
