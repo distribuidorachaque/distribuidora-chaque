@@ -829,6 +829,10 @@ function abrirModalCliente(id) {
 
   const btnTel2 = document.getElementById("btnModalTelefono2");
   if (btnTel2) btnTel2.style.display = client.telefono2 ? "flex" : "none";
+  const btnMsg = document.getElementById("btnModalRecordarMensaje");
+  if (btnMsg) btnMsg.innerHTML = client.recordarMensaje
+    ? `<span class="modal-icon">✅</span><span>Ya le escribí</span>`
+    : `<span class="modal-icon">📱</span><span>Recordar mensaje</span>`;
 
   document.getElementById("modalCliente").style.display = "flex";
 }
@@ -928,6 +932,7 @@ function setFiltroDia(dia) {
 
 function clientesFiltrados() {
   let lista = clients.filter(c => !c.eliminado);
+  if (filtroMensajes) lista = lista.filter(c => c.porMensaje || c.recordarMensaje);
 
   if (tiposSeleccionados.size > 0) {
     lista = lista.filter(c => tiposSeleccionados.has(c.tipo || "Otro"));
@@ -1041,6 +1046,7 @@ function guardarCliente() {
   const email      = document.getElementById("formClienteEmail").value.trim();
   const direccion  = document.getElementById("formClienteDireccion").value.trim();
   const potencial  = document.getElementById("formClientePotencial").checked;
+  const porMensaje = !!document.getElementById("formClientePorMensaje")?.checked;
   const seguimiento = document.getElementById("formClienteSeguimiento")?.value || "";
   const latVal = document.getElementById("formClienteLat")?.value;
   const lngVal = document.getElementById("formClienteLng")?.value;
@@ -1075,9 +1081,9 @@ function guardarCliente() {
 
   if (editandoClienteId) {
     const c = clients.find(c => c.id === editandoClienteId);
-    if (c) Object.assign(c, { nombre, tipo, diaVisita, zona, horario, frecuencia, telefono, telefono2, email, direccion, potencial, seguimiento, lat, lng, ubicacionManual, actualizadoEn: Date.now() });
+    if (c) Object.assign(c, { nombre, tipo, diaVisita, zona, horario, frecuencia, telefono, telefono2, email, direccion, potencial, porMensaje, seguimiento, lat, lng, ubicacionManual, actualizadoEn: Date.now() });
   } else {
-    clients.unshift({ id: generarId(), nombre, tipo, diaVisita, zona, horario, frecuencia, telefono, telefono2, email, direccion, notas: "", potencial, seguimiento, lat, lng, ubicacionManual, actualizadoEn: Date.now() });
+    clients.unshift({ id: generarId(), nombre, tipo, diaVisita, zona, horario, frecuencia, telefono, telefono2, email, direccion, notas: "", potencial, porMensaje, seguimiento, lat, lng, ubicacionManual, actualizadoEn: Date.now() });
   }
 
   guardarStorage();
@@ -1752,10 +1758,37 @@ function confirmarEntrega(orderId) {
 
 // ── Sistema de pagos parciales ────────────────────────────────────────────────
 // ── WhatsApp directo desde la lista de clientes ────────────────────────────
+// ── 📱 Mensajes ────────────────────────────────────────────────────────────
+// porMensaje: cliente que se atiende por WhatsApp (no se visita). Fijo.
+// recordarMensaje: recordatorio "tengo que mandarle un mensaje". Se borra
+// solo cuando le escribís por WhatsApp desde la app.
+let filtroMensajes = false;
+function marcarMensajeEnviado(clienteId) {
+  const c = clients.find(x => x.id === clienteId);
+  if (!c || !c.recordarMensaje) return;
+  delete c.recordarMensaje;
+  c.actualizadoEn = Date.now();
+  guardarStorage();
+}
+function toggleRecordarMensaje() {
+  const c = clients.find(x => x.id === clienteActivoId);
+  if (!c) return;
+  if (c.recordarMensaje) delete c.recordarMensaje; else c.recordarMensaje = fechaHoyLocal();
+  c.actualizadoEn = Date.now();
+  guardarStorage();
+  cerrarModal();
+  renderApp();
+}
+function toggleFiltroMensajes() {
+  filtroMensajes = !filtroMensajes;
+  renderVistaClientes();
+}
+
 function abrirWhatsAppCliente(clienteId) {
   const c = clients.find(c => c.id === clienteId);
   if (!c || !c.telefono) return;
   const tel = c.telefono.replace(/\D/g, "");
+  marcarMensajeEnviado(clienteId);
   window.open(`https://wa.me/54${tel}`, "_blank");
 }
 
@@ -1763,6 +1796,7 @@ function abrirWhatsAppCliente2(clienteId) {
   const c = clients.find(c => c.id === clienteId);
   if (!c || !c.telefono2) return;
   const tel = c.telefono2.replace(/\D/g, "");
+  marcarMensajeEnviado(clienteId);
   window.open(`https://wa.me/54${tel}`, "_blank");
 }
 
@@ -2254,6 +2288,7 @@ function enviarRecordatorioPago(clienteId) {
   const tel = client.telefono ? client.telefono.replace(/\D/g, "") : "";
   const url = tel ? `https://wa.me/54${tel}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
   if (!tel) alert("Este cliente no tiene teléfono cargado — vas a tener que elegir el contacto a mano en WhatsApp.");
+  marcarMensajeEnviado(clienteId);
   window.open(url, "_blank");
 }
 
@@ -2394,6 +2429,7 @@ function enviarWhatsAppPedidoActual() {
   const tel = client.telefono ? client.telefono.replace(/\D/g, "") : "";
   const url = tel ? `https://wa.me/54${tel}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
   // WhatsApp se abre en el mismo toque (si no, el celu lo puede bloquear).
+  marcarMensajeEnviado(client.id);
   window.open(url, "_blank");
 
   // Si es un pedido nuevo, se guarda en el momento: al irte a WhatsApp el
@@ -2419,6 +2455,7 @@ function enviarWhatsAppPedidoGuardado(id) {
   const msg = construirMensajeWhatsApp(order, order.modoPrecio || "sin");
   const tel = order.client.telefono ? order.client.telefono.replace(/\D/g, "") : "";
   const url = tel ? `https://wa.me/54${tel}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+  marcarMensajeEnviado(order.client.id);
   window.open(url, "_blank");
 }
 
@@ -2503,6 +2540,7 @@ function venderYCobrar() {
   const tel = client.telefono ? client.telefono.replace(/\D/g, "") : "";
   const url = tel ? `https://wa.me/54${tel}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
   if (!tel) alert("Este cliente no tiene teléfono cargado — vas a tener que elegir el contacto a mano en WhatsApp.");
+  marcarMensajeEnviado(client.id);
   window.open(url, "_blank");
 
   guardarStorage();
@@ -2532,6 +2570,7 @@ function enviarConfirmacionPago(id) {
   const tel = order.client.telefono ? order.client.telefono.replace(/\D/g, "") : "";
   const url = tel ? `https://wa.me/54${tel}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
   if (!tel) alert("Este cliente no tiene teléfono cargado — vas a tener que elegir el contacto a mano en WhatsApp.");
+  marcarMensajeEnviado(order.client.id);
   window.open(url, "_blank");
 }
 
@@ -2951,6 +2990,10 @@ function renderApp() {
             <span class="modal-icon">👋</span>
             <span>Visitado hoy</span>
           </button>
+          <button class="modal-btn" id="btnModalRecordarMensaje" onclick="toggleRecordarMensaje()">
+            <span class="modal-icon">📱</span>
+            <span>Recordar mensaje</span>
+          </button>
           <button class="modal-btn" id="btnModalTelefono2" style="display:none;" onclick="abrirWhatsAppCliente2(clienteActivoId)">
             <span class="modal-icon">💬</span>
             <span>WhatsApp Tel. 2</span>
@@ -3209,6 +3252,11 @@ function renderVistaClientes() {
       <button class="tipo-tab" style="border-left:3px solid #2563eb;" onclick="abrirRuta()">🗓️ Ruta del día</button>
       <button class="tipo-tab" style="border-left:3px solid #f59e0b;" onclick="abrirOrdenarClientes()">📋 Ordenar</button>
       <button class="tipo-tab" style="border-left:3px solid #7c3aed;" onclick="setVista('mapa-rutas')">🗺️ Mapa</button>
+      ${(() => {
+        const nMsg = clients.filter(c => !c.eliminado && (c.porMensaje || c.recordarMensaje)).length;
+        const nRec = clients.filter(c => !c.eliminado && c.recordarMensaje).length;
+        return nMsg ? `<button class="tipo-tab ${filtroMensajes ? "active" : ""}" style="border-left:3px solid #059669;" onclick="toggleFiltroMensajes()">📱 Mensajes${nRec ? " (" + nRec + " pendiente" + (nRec === 1 ? "" : "s") + ")" : ""}</button>` : "";
+      })()}
       ${contarClientesInactivos() > 0
         ? `<button class="tipo-tab" style="border-left:3px solid #dc2626;" onclick="setVista('inactivos')">⏰ Inactivos (${contarClientesInactivos()})</button>`
         : ""}
@@ -3266,7 +3314,8 @@ const sinComprar = cuentaInactividad(c) && dias !== null && dias >= umbralInacti
                 <div class="client-tipo-dot tipo-${(c.tipo || 'Otro').toLowerCase().replace('é','e').replace('ú','u')}"></div>
                 <div class="client-info">
                   <div class="client-name">
-                    ${c.potencial ? '🌱 ' : ''}${c.nombre}
+                    ${c.potencial ? '🌱 ' : ''}${c.nombre}${c.porMensaje ? ' <span title="Lo atendés por mensaje">📱</span>' : ''}
+                    ${c.recordarMensaje ? ` <span style="display:inline-block; background:#d1fae5; color:#065f46; border-radius:10px; padding:1px 8px; font-size:12px; font-weight:600;">📱 Mandar mensaje</span>` : ''}
                     ${montoDeuda > 0 ? ` <span class="badge-deuda">💰 ${formatCurrency(montoDeuda)}</span>` : ''}
                    ${sinComprar && !c.potencial ? ` <span class="badge-sin-comprar">⏰ ${dias}d</span>` : ''}
                     ${badgeSeguimiento}
@@ -3776,6 +3825,12 @@ function renderVistaFormCliente() {
         <input type="hidden" id="formClienteUbicacionManual" value="${c && c.ubicacionManual ? "1" : ""}" />
       </div>
 
+      <div class="form-group" style="margin-bottom:10px;">
+        <label class="switch-label">
+          <input type="checkbox" id="formClientePorMensaje" ${c && c.porMensaje ? "checked" : ""} />
+          <span>📱 Lo atiendo por mensaje (no lo visito)</span>
+        </label>
+      </div>
       <div class="form-group potencial-box">
         <label class="switch-label">
           <input type="checkbox" id="formClientePotencial" onchange="togglePotencial()" ${c && c.potencial ? "checked" : ""} />
@@ -4243,6 +4298,7 @@ function enviarAvisoPagoRegistrado(clienteId, monto, medio, deudaRestante) {
   const tel = client.telefono ? client.telefono.replace(/\D/g, "") : "";
   const url = tel ? `https://wa.me/54${tel}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
   if (!tel) alert("Este cliente no tiene teléfono cargado — vas a tener que elegir el contacto a mano en WhatsApp.");
+  marcarMensajeEnviado(clienteId);
   window.open(url, "_blank");
 }
 
@@ -5027,7 +5083,7 @@ function renderVistaRuta() {
       <div class="client-item" style="flex-direction:column; align-items:stretch; gap:6px; ${comproHoy || visitadoHoy ? "opacity:0.6;" : ""}">
         <div style="display:flex; justify-content:space-between; gap:8px;">
           <div>
-            <div class="client-name">${c.nombre}${comproHoy ? " ✅" : visitadoHoy ? " 👋" : ""}</div>
+            <div class="client-name">${c.nombre}${c.porMensaje ? " 📱" : ""}${comproHoy ? " ✅" : visitadoHoy ? " 👋" : ""}${c.recordarMensaje ? ` <span style="background:#d1fae5; color:#065f46; border-radius:10px; padding:1px 8px; font-size:12px;">📱 Mandar mensaje</span>` : ""}</div>
             <div class="client-sub">${c.zona ? "📍 " + c.zona + " · " : ""}${textoFrecuencia(c)}${dias !== null ? " · última compra/visita hace " + dias + " día" + (dias === 1 ? "" : "s") : " · nunca compró"}</div>
             ${faltaElegirSemana(c) ? `<div style="font-size:12px; color:#92400e;">⚠️ Falta elegir en qué semana le toca (📋 Ordenar clientes)</div>` : ""}
           </div>
@@ -6126,6 +6182,7 @@ function enviarAvisoMarcaCliente(clienteId) {
   const msg = mensajeAvisoMarca.replace(/\{nombre\}/g, c.nombre);
   const tel = c.telefono ? c.telefono.replace(/\D/g, "") : "";
   if (!tel) return alert(`${c.nombre} no tiene teléfono cargado — tenés que avisarle por otro medio.`);
+  marcarMensajeEnviado(clienteId);
   window.open(`https://wa.me/54${tel}?text=${encodeURIComponent(msg)}`, "_blank");
   enviadosAvisoMarca.add(clienteId);
   renderVistaAvisoMarca();
