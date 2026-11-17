@@ -788,7 +788,7 @@ function verDatosCliente() {
 
   document.getElementById("verClienteNombre").textContent = c.nombre;
 
-  const frecuenciaTxto = sinFrecuencia(c) ? "Sin frecuencia" : (Number(c.frecuencia) === 14 ? "Quincenal (cada 14 días)" : (Number(c.frecuencia) === 21 ? "Cada 21 días" : "Semanal (cada 7 días)"));
+  const frecuenciaTxto = sinFrecuencia(c) ? "Sin frecuencia" : (Number(c.frecuencia) === 14 ? "Quincenal (cada 14 días)" : (Number(c.frecuencia) === 21 ? "Cada 21 días" : (Number(c.frecuencia) === 28 ? "Cada 28 días" : "Semanal (cada 7 días)")));
   const filas = [
     ["Tipo", c.tipo || "Otro"],
     ["Zona", c.zona || "—"],
@@ -825,7 +825,7 @@ function abrirModalCliente(id) {
 
   document.getElementById("modalClienteNombre").textContent = client.nombre;
   document.getElementById("modalClienteInfo").textContent =
-    [client.tipo || "Otro", client.zona ? "📍 " + client.zona : "", client.horario ? "🕐 " + client.horario : "", sinFrecuencia(client) ? "📅 Sin frecuencia" : (Number(client.frecuencia) === 14 ? "📅 Quincenal" : (Number(client.frecuencia) === 21 ? "📅 Cada 21 días" : "📅 Semanal")), client.telefono, client.telefono2, client.direccion].filter(Boolean).join(" · ");
+    [client.tipo || "Otro", client.zona ? "📍 " + client.zona : "", client.horario ? "🕐 " + client.horario : "", sinFrecuencia(client) ? "📅 Sin frecuencia" : (Number(client.frecuencia) === 14 ? "📅 Quincenal" : (Number(client.frecuencia) === 21 ? "📅 Cada 21 días" : (Number(client.frecuencia) === 28 ? "📅 Cada 28 días" : "📅 Semanal"))), client.telefono, client.telefono2, client.direccion].filter(Boolean).join(" · ");
 
   const btnTel2 = document.getElementById("btnModalTelefono2");
   if (btnTel2) btnTel2.style.display = client.telefono2 ? "flex" : "none";
@@ -3746,9 +3746,10 @@ function renderVistaFormCliente() {
       <div class="form-group">
         <label>Frecuencia de visita</label>
         <select id="formClienteFrecuencia">
-          <option value="7" ${!c || (Number(c.frecuencia) !== 14 && Number(c.frecuencia) !== 21 && !sinFrecuencia(c)) ? "selected" : ""}>Semanal (cada 7 días)</option>
+          <option value="7" ${!c || (![14, 21, 28].includes(Number(c.frecuencia)) && !sinFrecuencia(c)) ? "selected" : ""}>Semanal (cada 7 días)</option>
           <option value="14" ${c && Number(c.frecuencia) === 14 ? "selected" : ""}>Quincenal (cada 14 días)</option>
           <option value="21" ${c && Number(c.frecuencia) === 21 ? "selected" : ""}>Cada 21 días</option>
+          <option value="28" ${c && Number(c.frecuencia) === 28 ? "selected" : ""}>Cada 28 días</option>
           <option value="0" ${sinFrecuencia(c) ? "selected" : ""}>Sin frecuencia (no avisar días sin comprar)</option>
         </select>
       </div>
@@ -4900,11 +4901,11 @@ function renderCardVentaWeb(mesSel, anioSel, mesNombre) {
 // ═══════════════════════════════════════════════════════════════
 // RUTA DEL DÍA y ORDENAR CLIENTES
 // ═══════════════════════════════════════════════════════════════
-// Cada cliente tiene día de visita, zona y frecuencia (7, 14 o 21 días). El
+// Cada cliente tiene día de visita, zona y frecuencia (7, 14, 21 o 28 días). El
 // calendario es FIJO, no depende de si compró: un quincenal de los martes
 // toca un martes sí y otro no. Para saber cuál, se guarda "cicloInicio": el
 // lunes de una semana en la que le toca (se elige con "¿Cuándo le toca la
-// próxima? Esta semana / La que viene / En 2 semanas").
+// próxima? Esta semana / La que viene / En 2 semanas / En 3 semanas").
 const NOMBRES_DIA = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 let rutaFecha = null;          // "YYYY-MM-DD" del día que se está mirando
 let rutaZona = "Todas";
@@ -4925,7 +4926,7 @@ function lunesDe(fecha) {
 }
 function frecuenciaSemanas(c) {
   const f = Number(c.frecuencia);
-  return f === 14 ? 2 : f === 21 ? 3 : 1; // sin dato = semanal, como siempre
+  return f === 14 ? 2 : f === 21 ? 3 : f === 28 ? 4 : 1; // sin dato = semanal, como siempre
 }
 function faltaElegirSemana(c) {
   return frecuenciaSemanas(c) > 1 && !c.cicloInicio;
@@ -4952,7 +4953,7 @@ function fechaCorta(d) {
 function textoFrecuencia(c) {
   if (sinFrecuencia(c)) return "Sin frecuencia";
   const n = frecuenciaSemanas(c);
-  return n === 2 ? "Cada 14 días" : n === 3 ? "Cada 21 días" : "Semanal";
+  return n === 2 ? "Cada 14 días" : n === 3 ? "Cada 21 días" : n === 4 ? "Cada 28 días" : "Semanal";
 }
 function clientesDeRuta() {
   return clients.filter(c => !c.eliminado && c.id !== CLIENTE_WEB_ID && (c.tipo || "Otro") !== "Otro");
@@ -5077,7 +5078,7 @@ function renderVistaRuta() {
     <div class="form-card" style="border-left:4px solid #f59e0b;">
       <p style="margin:0 0 8px; font-size:14px;">
         ${sinDia ? `⚠️ ${sinDia} cliente${sinDia === 1 ? "" : "s"} sin día de visita (no aparecen en ninguna ruta).<br>` : ""}
-        ${faltaSemana ? `⚠️ ${faltaSemana} cliente${faltaSemana === 1 ? "" : "s"} de 14 o 21 días sin semana elegida.` : ""}
+        ${faltaSemana ? `⚠️ ${faltaSemana} cliente${faltaSemana === 1 ? "" : "s"} de 14, 21 o 28 días sin semana elegida.` : ""}
       </p>
       <button class="btn-primary btn-full" onclick="setVista('ordenar-clientes')">📋 Ordenar clientes</button>
     </div>` : ""}
@@ -5126,7 +5127,7 @@ function filaOrdenarCliente(c) {
     const hoyLunes = lunesDe(new Date());
     const prox = c.cicloInicio ? proximaSemanaQueToca(c, new Date()) : null;
     const k = prox ? Math.round((prox - hoyLunes) / (7 * 86400000)) : -1;
-    const opciones = ["Esta semana", "La que viene", "En 2 semanas"].slice(0, n);
+    const opciones = ["Esta semana", "La que viene", "En 2 semanas", "En 3 semanas"].slice(0, n);
     semana = `
       <div style="margin-top:6px;">
         <div style="font-size:12px; ${c.cicloInicio ? "color:#6b7280;" : "color:#92400e; font-weight:600;"}">${c.cicloInicio ? "¿Cuándo le toca la próxima?" : "⚠️ ¿Cuándo le toca la próxima?"}</div>
@@ -5147,6 +5148,7 @@ function filaOrdenarCliente(c) {
           <option value="7" ${n === 1 ? "selected" : ""}>Semanal</option>
           <option value="14" ${n === 2 ? "selected" : ""}>Cada 14</option>
           <option value="21" ${n === 3 ? "selected" : ""}>Cada 21</option>
+          <option value="28" ${n === 4 ? "selected" : ""}>Cada 28</option>
           <option value="0" ${n === 0 ? "selected" : ""}>Sin frec.</option>
         </select>
         <input list="listaZonasOrdenar" placeholder="Zona…" value="${esc(c.zona)}" onchange="cambiarClienteOrden('${c.id}', 'zona', this.value)" style="${c.zona ? "" : "border:2px solid #f59e0b;"}" />
@@ -5178,7 +5180,7 @@ function renderVistaOrdenarClientes() {
       <h2 class="page-title2">📋 Ordenar clientes</h2>
     </div>
     <div class="form-card">
-      <p class="muted" style="margin:0 0 8px; font-size:13px;">Elegí día, frecuencia y zona de cada cliente. Se guarda solo al cambiarlo. A los de 14 o 21 días, tocá cuándo les toca la próxima.</p>
+      <p class="muted" style="margin:0 0 8px; font-size:13px;">Elegí día, frecuencia y zona de cada cliente. Se guarda solo al cambiarlo. A los de 14, 21 o 28 días, tocá cuándo les toca la próxima.</p>
       <div class="tipo-tabs" style="margin-bottom:8px;">
         <button class="tipo-tab ${ordenarSoloFaltantes ? "active" : ""}" onclick="${ordenarSoloFaltantes ? "" : "toggleSoloFaltantes()"}">⚠️ Les falta algo (${faltan})</button>
         <button class="tipo-tab ${ordenarSoloFaltantes ? "" : "active"}" onclick="${ordenarSoloFaltantes ? "toggleSoloFaltantes()" : ""}">Ver todos</button>
