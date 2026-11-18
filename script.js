@@ -2382,7 +2382,9 @@ function confirmarPago(orderId) {
   const medioInput = document.getElementById("medioPago-" + orderId);
   const medio = medioInput ? medioInput.value : "Efectivo";
   if (!order.pagos) order.pagos = [];
-  order.pagos.push({ id: generarId(), fecha: new Date().toLocaleString("es-AR"), monto: monto - excedente, medio });
+  const pago = { id: generarId(), fecha: new Date().toLocaleString("es-AR"), monto: monto - excedente, medio };
+  if (excedente > 0) pago.aFavor = Math.round(excedente * 100) / 100; // lo que pagó de más (quedó a favor)
+  order.pagos.push(pago);
   if (excedente > 0) sumarSaldoFavor(order.client.id, excedente, `Pagó de más (${medio})`);
   if (calcularSaldo(order) <= 0) order.pagado = true;
   order.actualizadoEn = Date.now();
@@ -2617,9 +2619,15 @@ function enviarConfirmacionPago(id) {
   const deudaCliente = deudaTotalCliente(order.client.id);
   const nombre = order.client.nombre;
 
+  const favor = saldoFavorCliente(order.client.id);
+  const textoFavor = favor > 0 ? ` Te queda un *saldo a favor de ${formatCurrency(favor)}* para tu próximo pedido.` : "";
+  const recibido = ultimoPago.monto + (Number(ultimoPago.aFavor) || 0); // lo que transfirió de verdad
+  const inicio = ultimoPago.medio === "Saldo a favor"
+    ? `Hola ${nombre} 👋\n\nUsamos *${formatCurrency(ultimoPago.monto)}* de tu saldo a favor para tu pedido.`
+    : `Hola ${nombre} 👋\n\nConfirmo que recibí tu pago de *${formatCurrency(recibido)}*.`;
   const msg = deudaCliente <= 0
-    ? `Hola ${nombre} 👋\n\nConfirmo que recibí tu pago de *${formatCurrency(ultimoPago.monto)}*. Tu cuenta quedó al día. ¡Gracias! 🙌`
-    : `Hola ${nombre} 👋\n\nConfirmo que recibí tu pago de *${formatCurrency(ultimoPago.monto)}*. Tu saldo pendiente actual es *${formatCurrency(deudaCliente)}*. ¡Gracias! 🙌`;
+    ? `${inicio} Tu cuenta quedó al día.${textoFavor} ¡Gracias! 🙌`
+    : `${inicio} Tu saldo pendiente actual es *${formatCurrency(deudaCliente)}*.${textoFavor} ¡Gracias! 🙌`;
 
   const tel = order.client.telefono ? order.client.telefono.replace(/\D/g, "") : "";
   const url = tel ? `https://wa.me/54${tel}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
