@@ -2318,6 +2318,55 @@ function elegirMedioPago(orderId, medio) {
   document.getElementById("medioTransferencia-" + orderId).classList.toggle("active", medio === "Transferencia");
 }
 
+// ── Saldo a favor ─────────────────────────────────────────────────────────
+// Si un cliente paga de más, el excedente queda en client.saldoFavor y se
+// anota en client.movimientosFavor. Se usa después con "Usar saldo a favor"
+// (queda como un pago con medio "Saldo a favor") o se ajusta a mano.
+function saldoFavorCliente(clienteId) {
+  const c = clients.find(x => x.id === clienteId);
+  return c ? Math.max(0, Number(c.saldoFavor) || 0) : 0;
+}
+function sumarSaldoFavor(clienteId, monto, motivo) {
+  const c = clients.find(x => x.id === clienteId);
+  if (!c || !monto) return;
+  c.saldoFavor = Math.round((saldoFavorCliente(clienteId) + monto) * 100) / 100;
+  c.movimientosFavor = [...(c.movimientosFavor || []), { fecha: new Date().toLocaleString("es-AR"), monto: Math.round(monto * 100) / 100, motivo }];
+  c.actualizadoEn = Date.now();
+}
+// Pregunta si el excedente queda a favor. Devuelve true si aceptó.
+function preguntarSaldoFavor(nombre, excedente, tope) {
+  return confirm(`El pago supera lo que debe en ${formatCurrency(excedente)} (debía ${formatCurrency(tope)}).\n\n¿Dejo ${formatCurrency(excedente)} como saldo a favor de ${nombre}?`);
+}
+function usarSaldoFavor(orderId) {
+  const order = orders.find(o => o.id === orderId);
+  if (!order) return;
+  const favor = saldoFavorCliente(order.client.id);
+  const saldo = calcularSaldo(order);
+  const usar = Math.min(favor, saldo);
+  if (usar <= 0) return;
+  if (!confirm(`¿Uso ${formatCurrency(usar)} del saldo a favor de ${order.client.nombre} para este pedido?`)) return;
+  if (!order.pagos) order.pagos = [];
+  order.pagos.push({ id: generarId(), fecha: new Date().toLocaleString("es-AR"), monto: usar, medio: "Saldo a favor" });
+  if (calcularSaldo(order) <= 0) order.pagado = true;
+  order.actualizadoEn = Date.now();
+  sumarSaldoFavor(order.client.id, -usar, "Usado en el pedido del " + String(order.fecha).replace(/,.*/, ""));
+  ordenConFormPago = null;
+  guardarStorage();
+  renderVistaHistorial();
+}
+function ajustarSaldoFavor(clienteId) {
+  const c = clients.find(x => x.id === clienteId);
+  if (!c) return;
+  const actual = saldoFavorCliente(clienteId);
+  const r = prompt(`Saldo a favor de ${c.nombre}: ${formatCurrency(actual)}\n\n¿Cuánto tiene que quedar? (0 si se lo devolviste)`, montoParaInput(actual).toLocaleString("es-AR"));
+  if (r === null) return;
+  const nuevo = parseNumber(r);
+  if (nuevo < 0) return alert("Tiene que ser 0 o más.");
+  sumarSaldoFavor(clienteId, nuevo - actual, "Ajuste a mano");
+  guardarStorage();
+  renderApp();
+}
+
 function confirmarPago(orderId) {
   const order = orders.find(o => o.id === orderId);
   if (!order) return;
@@ -2325,11 +2374,16 @@ function confirmarPago(orderId) {
   const monto = parseNumber(input.value);
   if (!monto || monto <= 0) return alert("Ingresá un monto válido");
   const saldo = calcularSaldo(order);
-  if (monto > saldo) return alert(`El monto supera el saldo. Saldo pendiente: ${formatCurrency(saldo)}`);
+  let excedente = 0;
+  if (monto > saldo + 0.009) {
+    if (!preguntarSaldoFavor(order.client.nombre, monto - saldo, saldo)) return;
+    excedente = monto - saldo;
+  }
   const medioInput = document.getElementById("medioPago-" + orderId);
   const medio = medioInput ? medioInput.value : "Efectivo";
   if (!order.pagos) order.pagos = [];
-  order.pagos.push({ id: generarId(), fecha: new Date().toLocaleString("es-AR"), monto, medio });
+  order.pagos.push({ id: generarId(), fecha: new Date().toLocaleString("es-AR"), monto: monto - excedente, medio });
+  if (excedente > 0) sumarSaldoFavor(order.client.id, excedente, `Pagó de más (${medio})`);
   if (calcularSaldo(order) <= 0) order.pagado = true;
   order.actualizadoEn = Date.now();
   ordenConFormPago = null;
@@ -3317,6 +3371,7 @@ const sinComprar = cuentaInactividad(c) && dias !== null && dias >= umbralInacti
                     ${c.potencial ? '🌱 ' : ''}${c.nombre}${c.porMensaje ? ' <span title="Lo atendés por mensaje">📱</span>' : ''}
                     ${c.recordarMensaje ? ` <span style="display:inline-block; background:#d1fae5; color:#065f46; border-radius:10px; padding:1px 8px; font-size:12px; font-weight:600;">📱 Mandar mensaje</span>` : ''}
                     ${montoDeuda > 0 ? ` <span class="badge-deuda">💰 ${formatCurrency(montoDeuda)}</span>` : ''}
+                    ${saldoFavorCliente(c.id) > 0 ? ` <span style="display:inline-block; background:#d1fae5; color:#065f46; border-radius:10px; padding:1px 8px; font-size:12px; font-weight:600;">💚 A favor ${formatCurrency(saldoFavorCliente(c.id))}</span>` : ''}
                    ${sinComprar && !c.potencial ? ` <span class="badge-sin-comprar">⏰ ${dias}d</span>` : ''}
                     ${badgeSeguimiento}
                   </div>
@@ -4036,7 +4091,7 @@ function renderOrderCard(order) {
     ${(order.pagos || []).length > 0 ? `
       <div class="pagos-lista">
         ${order.pagos.map(p => `
-          <div class="pago-item">${p.medio === "Transferencia" ? "🏦" : "💵"} ${formatCurrency(p.monto)} <span class="muted">· ${p.medio || "Efectivo"} · ${p.fecha}</span></div>
+          <div class="pago-item">${p.medio === "Transferencia" ? "🏦" : p.medio === "Saldo a favor" ? "💚" : "💵"} ${formatCurrency(p.monto)} <span class="muted">· ${p.medio || "Efectivo"} · ${p.fecha}</span></div>
         `).join('')}
       </div>` : ''}
 
@@ -4058,6 +4113,8 @@ function renderOrderCard(order) {
           <button type="button" class="medio-pago-tab" id="medioTransferencia-${order.id}" onclick="elegirMedioPago('${order.id}', 'Transferencia')">🏦 Transferencia</button>
           <input type="hidden" id="medioPago-${order.id}" value="Efectivo" />
         </div>
+        ${saldoFavorCliente(order.client.id) > 0 ? `
+        <button class="btn-outline btn-full" style="margin-bottom:8px; border-color:#059669; color:#065f46;" onclick="usarSaldoFavor('${order.id}')">💚 Usar saldo a favor (${formatCurrency(saldoFavorCliente(order.client.id))})</button>` : ""}
         <div class="row-2">
           <button class="btn-success" onclick="confirmarPago('${order.id}')">✅ Confirmar pago</button>
           <button class="btn-gray" onclick="abrirFormPago('${order.id}')">Cancelar</button>
@@ -4156,6 +4213,15 @@ function renderVistaHistorial() {
       <h2 class="page-title2">${client ? "Pedidos de " + client.nombre : "Todos los pedidos"}</h2>
     </div>
 
+    ${client && saldoFavorCliente(client.id) > 0 ? `
+    <div style="background:#ecfdf5; border:1px solid #6ee7b7; border-radius:12px; padding:12px 14px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+      <div>
+        <strong style="color:#065f46;">💚 Saldo a favor: ${formatCurrency(saldoFavorCliente(client.id))}</strong>
+        <div style="font-size:12px; color:#065f46;">Se usa desde "💵 Registrar pago" en un pedido.</div>
+      </div>
+      <button class="btn-sm btn-outline" onclick="ajustarSaldoFavor('${client.id}')">✏️ Ajustar</button>
+    </div>` : ""}
+
     ${pedidoRecienEntregadoId && lista.some(o => o.id === pedidoRecienEntregadoId) ? `
     <div style="background:#dcfce7; border:1px solid #86efac; border-radius:12px; padding:12px 14px; margin-bottom:12px;">
       <strong style="color:#065f46;">${tituloBannerPedido}</strong>
@@ -4244,7 +4310,11 @@ function confirmarPagoTotalCliente(clienteId) {
   const montoInput = document.getElementById("inputMontoPagoDeuda-" + clienteId);
   const monto = parseNumber(montoInput.value);
   if (!monto || monto <= 0) return alert("Ingresá un monto válido");
-  if (monto > deudaAntes) return alert(`El monto supera la deuda total. Deuda actual: ${formatCurrency(deudaAntes)}`);
+  let excedente = 0;
+  if (monto > deudaAntes + 0.009) {
+    if (!preguntarSaldoFavor(client.nombre, monto - deudaAntes, deudaAntes)) return;
+    excedente = monto - deudaAntes;
+  }
 
   const medioInput = document.getElementById("medioPagoDeuda-" + clienteId);
   const medio = medioInput ? medioInput.value : "Efectivo";
@@ -4255,7 +4325,8 @@ function confirmarPagoTotalCliente(clienteId) {
     .filter(o => o.client.id === clienteId && !o.eliminado && !o.pagado)
     .sort(ordenarPorFechaAsc);
 
-  let restante = monto;
+  let restante = monto - excedente;
+  if (excedente > 0) sumarSaldoFavor(clienteId, excedente, `Pagó de más (${medio})`);
   ordenesPendientes.forEach(o => {
     if (restante <= 0) return;
     const saldo = calcularSaldo(o);
@@ -4281,7 +4352,7 @@ function confirmarPagoTotalCliente(clienteId) {
   // el celu abre la app de una y los emojis salen bien, igual que el resto
   // de los botones de WhatsApp.
   const avisar = confirm(deudaDespues <= 0
-    ? `✅ Pago de ${formatCurrency(monto)} registrado. La cuenta de ${client.nombre} quedó al día.\n\n¿Le avisamos por WhatsApp?`
+    ? `✅ Pago de ${formatCurrency(monto)} registrado. La cuenta de ${client.nombre} quedó al día${excedente > 0 ? ` y le quedó ${formatCurrency(saldoFavorCliente(clienteId))} a favor` : ""}.\n\n¿Le avisamos por WhatsApp?`
     : `✅ Pago de ${formatCurrency(monto)} registrado. Todavía le queda un saldo de ${formatCurrency(deudaDespues)}.\n\n¿Le avisamos por WhatsApp?`);
   if (avisar) enviarAvisoPagoRegistrado(clienteId, monto, medio, deudaDespues);
 
@@ -4292,8 +4363,9 @@ function confirmarPagoTotalCliente(clienteId) {
 function enviarAvisoPagoRegistrado(clienteId, monto, medio, deudaRestante) {
   const client = clients.find(c => c.id === clienteId);
   if (!client) return;
+  const favor = saldoFavorCliente(clienteId);
   const msg = deudaRestante <= 0
-    ? `Hola ${client.nombre} 👋\n\nRegistramos tu pago de *${formatCurrency(monto)}* (${medio}). ¡Tu cuenta quedó al día! Gracias 🙌`
+    ? `Hola ${client.nombre} 👋\n\nRegistramos tu pago de *${formatCurrency(monto)}* (${medio}). ¡Tu cuenta quedó al día!${favor > 0 ? ` Te quedó un *saldo a favor de ${formatCurrency(favor)}* para tu próximo pedido.` : ""} Gracias 🙌`
     : `Hola ${client.nombre} 👋\n\nRegistramos tu pago de *${formatCurrency(monto)}* (${medio}). Tu saldo pendiente ahora es *${formatCurrency(deudaRestante)}*. ¡Gracias! 🙌`;
   const tel = client.telefono ? client.telefono.replace(/\D/g, "") : "";
   const url = tel ? `https://wa.me/54${tel}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
