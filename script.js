@@ -829,6 +829,8 @@ function abrirModalCliente(id) {
 
   const btnTel2 = document.getElementById("btnModalTelefono2");
   if (btnTel2) btnTel2.style.display = client.telefono2 ? "flex" : "none";
+  const btnMandar = document.getElementById("btnModalMandarMensaje");
+  if (btnMandar) btnMandar.style.display = client.porMensaje && client.telefono ? "flex" : "none";
   const btnMsg = document.getElementById("btnModalRecordarMensaje");
   if (btnMsg) btnMsg.innerHTML = client.recordarMensaje
     ? `<span class="modal-icon">✅</span><span>Ya le escribí</span>`
@@ -1047,6 +1049,7 @@ function guardarCliente() {
   const direccion  = document.getElementById("formClienteDireccion").value.trim();
   const potencial  = document.getElementById("formClientePotencial").checked;
   const porMensaje = !!document.getElementById("formClientePorMensaje")?.checked;
+  const mensajePropio = (document.getElementById("formClienteMensajePropio")?.value || "").trim();
   const seguimiento = document.getElementById("formClienteSeguimiento")?.value || "";
   const latVal = document.getElementById("formClienteLat")?.value;
   const lngVal = document.getElementById("formClienteLng")?.value;
@@ -1081,9 +1084,9 @@ function guardarCliente() {
 
   if (editandoClienteId) {
     const c = clients.find(c => c.id === editandoClienteId);
-    if (c) Object.assign(c, { nombre, tipo, diaVisita, zona, horario, frecuencia, telefono, telefono2, email, direccion, potencial, porMensaje, seguimiento, lat, lng, ubicacionManual, actualizadoEn: Date.now() });
+    if (c) Object.assign(c, { nombre, tipo, diaVisita, zona, horario, frecuencia, telefono, telefono2, email, direccion, potencial, porMensaje, mensajePropio, seguimiento, lat, lng, ubicacionManual, actualizadoEn: Date.now() });
   } else {
-    clients.unshift({ id: generarId(), nombre, tipo, diaVisita, zona, horario, frecuencia, telefono, telefono2, email, direccion, notas: "", potencial, porMensaje, seguimiento, lat, lng, ubicacionManual, actualizadoEn: Date.now() });
+    clients.unshift({ id: generarId(), nombre, tipo, diaVisita, zona, horario, frecuencia, telefono, telefono2, email, direccion, notas: "", potencial, porMensaje, mensajePropio, seguimiento, lat, lng, ubicacionManual, actualizadoEn: Date.now() });
   }
 
   guardarStorage();
@@ -1798,7 +1801,7 @@ function enviarMensajeCliente(clienteId) {
   const caja = document.getElementById("textoMensajeClientes");
   if (caja && caja.value.trim() !== textoMensajeClientes()) guardarMensajeClientes(caja.value);
   const primerNombre = String(c.nombre).trim();
-  const msg = textoMensajeClientes().replace(/\{nombre\}/gi, primerNombre);
+  const msg = (c.mensajePropio || textoMensajeClientes()).replace(/\{nombre\}/gi, primerNombre);
   const tel = c.telefono.replace(/\D/g, "");
   // WhatsApp se abre en el mismo toque (si no, el celu lo puede bloquear).
   window.open(`https://wa.me/54${tel}?text=${encodeURIComponent(msg)}`, "_blank");
@@ -1814,7 +1817,7 @@ function filaMensajeCliente(c) {
   return `
     <div id="msg-fila-${c.id}" class="stock-row">
       <div>
-        <div class="stock-nombre">${c.nombre}${c.recordarMensaje ? ' <span style="font-size:12px; color:#065f46;">📱 pendiente</span>' : ""}</div>
+        <div class="stock-nombre">${c.nombre}${c.recordarMensaje ? ' <span style="font-size:12px; color:#065f46;">📱 pendiente</span>' : ""}${c.mensajePropio ? ' <span style="font-size:12px; color:#6b7280;">✏️ mensaje propio</span>' : ""}</div>
         <div class="muted" style="font-size:12px;">${c.telefono || "sin teléfono"}</div>
       </div>
       ${!c.telefono ? `<span class="muted" style="font-size:12px;">Cargá el teléfono</span>`
@@ -3109,6 +3112,10 @@ function renderApp() {
             <span class="modal-icon">👋</span>
             <span>Visitado hoy</span>
           </button>
+          <button class="modal-btn" id="btnModalMandarMensaje" style="display:none;" onclick="enviarMensajeCliente(clienteActivoId); cerrarModal(); renderApp();">
+            <span class="modal-icon">📤</span>
+            <span>Mandar su mensaje</span>
+          </button>
           <button class="modal-btn" id="btnModalRecordarMensaje" onclick="toggleRecordarMensaje()">
             <span class="modal-icon">📱</span>
             <span>Recordar mensaje</span>
@@ -3949,9 +3956,14 @@ function renderVistaFormCliente() {
 
       <div class="form-group" style="margin-bottom:10px;">
         <label class="switch-label">
-          <input type="checkbox" id="formClientePorMensaje" ${c && c.porMensaje ? "checked" : ""} />
+          <input type="checkbox" id="formClientePorMensaje" ${c && c.porMensaje ? "checked" : ""} onchange="document.getElementById('cajaMensajePropio').style.display = this.checked ? 'block' : 'none'" />
           <span>📱 Lo atiendo por mensaje (no lo visito)</span>
         </label>
+        <div id="cajaMensajePropio" style="display:${c && c.porMensaje ? "block" : "none"}; margin-top:8px;">
+          <label style="font-size:13px;">Mensaje para este cliente (cómo lo querés saludar)</label>
+          <textarea id="formClienteMensajePropio" rows="3" placeholder="${textoMensajeClientes().replace(/"/g, "&quot;")}" style="width:100%; box-sizing:border-box;">${c && c.mensajePropio ? String(c.mensajePropio).replace(/&/g, "&amp;").replace(/</g, "&lt;") : ""}</textarea>
+          <div class="muted" style="font-size:12px;">Si lo dejás vacío se usa el mensaje general. {nombre} se reemplaza por su nombre.</div>
+        </div>
       </div>
       <div class="form-group potencial-box">
         <label class="switch-label">
