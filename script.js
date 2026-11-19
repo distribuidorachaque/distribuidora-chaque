@@ -1779,6 +1779,63 @@ function toggleRecordarMensaje() {
   cerrarModal();
   renderApp();
 }
+// Mensaje igual para todos los clientes de "📱 Mensajes": se escribe una vez
+// (queda guardado y viaja con la config a los otros dispositivos) y se manda
+// de a uno por WhatsApp, con el nombre de cada cliente puesto solo.
+const MENSAJE_CLIENTES_DEFECTO = "Hola {nombre} 👋 ¿Cómo andás? ¿Necesitás algo para esta semana? Avisame y te lo llevo 🙌";
+function textoMensajeClientes() {
+  return configVehiculo.mensajeClientes || MENSAJE_CLIENTES_DEFECTO;
+}
+function guardarMensajeClientes(valor) {
+  configVehiculo.mensajeClientes = String(valor || "").trim() || MENSAJE_CLIENTES_DEFECTO;
+  configVehiculo.actualizadoEn = Date.now();
+  setItemSeguro("alunexa_config_vehiculo_v1", JSON.stringify(configVehiculo));
+  fetchConTimeout(API_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ tipo: "vehiculo", payload: [configVehiculo] }) });
+}
+function enviarMensajeCliente(clienteId) {
+  const c = clients.find(x => x.id === clienteId);
+  if (!c || !c.telefono) return;
+  const caja = document.getElementById("textoMensajeClientes");
+  if (caja && caja.value.trim() !== textoMensajeClientes()) guardarMensajeClientes(caja.value);
+  const primerNombre = String(c.nombre).trim();
+  const msg = textoMensajeClientes().replace(/\{nombre\}/gi, primerNombre);
+  const tel = c.telefono.replace(/\D/g, "");
+  // WhatsApp se abre en el mismo toque (si no, el celu lo puede bloquear).
+  window.open(`https://wa.me/54${tel}?text=${encodeURIComponent(msg)}`, "_blank");
+  c.ultimoMensajeEnviado = fechaHoyLocal();
+  delete c.recordarMensaje;
+  c.actualizadoEn = Date.now();
+  guardarStorage();
+  const fila = document.getElementById("msg-fila-" + clienteId);
+  if (fila) fila.outerHTML = filaMensajeCliente(c);
+}
+function filaMensajeCliente(c) {
+  const enviadoHoy = c.ultimoMensajeEnviado === fechaHoyLocal();
+  return `
+    <div id="msg-fila-${c.id}" class="stock-row">
+      <div>
+        <div class="stock-nombre">${c.nombre}${c.recordarMensaje ? ' <span style="font-size:12px; color:#065f46;">📱 pendiente</span>' : ""}</div>
+        <div class="muted" style="font-size:12px;">${c.telefono || "sin teléfono"}</div>
+      </div>
+      ${!c.telefono ? `<span class="muted" style="font-size:12px;">Cargá el teléfono</span>`
+        : enviadoHoy ? `<button class="btn-sm btn-outline" style="color:#059669; border-color:#059669;" onclick="enviarMensajeCliente('${c.id}')">✅ Enviado hoy</button>`
+        : `<button class="btn-sm btn-success" style="color:#fff;" onclick="enviarMensajeCliente('${c.id}')">📤 Enviar</button>`}
+    </div>`;
+}
+function renderCardMensajeClientes() {
+  const lista = clients.filter(c => !c.eliminado && (c.porMensaje || c.recordarMensaje)).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  const enviados = lista.filter(c => c.ultimoMensajeEnviado === fechaHoyLocal()).length;
+  const esc = t => String(t || "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  return `
+    <div class="form-card" style="border-left:4px solid #059669;">
+      <h3 class="section-title">✉️ Mensaje para tus clientes</h3>
+      <textarea id="textoMensajeClientes" rows="3" onchange="guardarMensajeClientes(this.value)" style="width:100%; box-sizing:border-box;">${esc(textoMensajeClientes())}</textarea>
+      <p class="muted" style="margin:4px 0 10px; font-size:12px;">Donde dice <strong>{nombre}</strong> va el nombre de cada cliente. Queda guardado para la próxima.</p>
+      <div class="muted" style="font-size:13px; margin-bottom:4px;">Tocá 📤 en cada uno: se abre WhatsApp con el mensaje listo, lo mandás y volvés. ${lista.length ? `(${enviados} de ${lista.length} enviados hoy)` : ""}</div>
+      ${lista.map(filaMensajeCliente).join("")}
+    </div>`;
+}
+
 function toggleFiltroMensajes() {
   filtroMensajes = !filtroMensajes;
   renderVistaClientes();
@@ -3323,6 +3380,8 @@ function renderVistaClientes() {
         ? `<button class="tipo-tab" style="border-left:3px solid #dc2626;" onclick="setVista('inactivos')">⏰ Inactivos (${contarClientesInactivos()})</button>`
         : ""}
     </div>
+
+    ${filtroMensajes ? renderCardMensajeClientes() : ""}
 
     <div class="search-box">
       <input id="inputBusquedaCliente" type="text" placeholder="🔍 Buscar por nombre, dirección o teléfono" value="${busquedaCliente}" oninput="buscarClientes(this.value)" />
