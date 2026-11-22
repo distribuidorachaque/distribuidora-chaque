@@ -22,6 +22,8 @@ JavaScript puro, sin frameworks, publicada en GitHub Pages desde la rama `main`.
 - Los clientes tipo **"Otro"** y **"🌐 Venta web"** no cuentan en los rankings de Top clientes, pero sus ventas se suman en todo lo demás.
 - Los productos se listan **ordenados por código** en todas las pantallas (`catalogActivo()`).
 - **No hay logo de fondo (marca de agua)**: lo probó y le distraía. No volver a agregarlo.
+- **Se sacaron** (no los usa más, no volver a agregarlos): los botones **📥 Día** y **📊 Mensual** de "Productos vendidos" (Resumen) y las **fotos de productos** (botón "📷 Ver imagen"; ya tiene la página web con las fotos). El único Excel que queda es el del contador (Monotributo) y el del pedido a fábrica.
+- La tabla `PRECIOS_DISTRIBUIDOR` (costos) **no es de esos botones**: la usa `costoDeProducto` para la ganancia. No borrarla.
 - Las pantallas largas del Resumen se **pliegan** (arrancan cerradas, se abren tocando el título): Monotributo, Venta web, Nafta, Km, Gastos extraordinarios y los tres Top. Mantener ese estilo para secciones nuevas.
 - Los precios de los pedidos web son los que vienen en el mensaje de WhatsApp (público o mayorista según la cantidad).
 - El **costo con descuento** de cada producto se usa para calcular la ganancia; el **precio de lista de fábrica** (`precioLista`) es aparte y solo va en el pedido a fábrica.
@@ -43,7 +45,7 @@ JavaScript puro, sin frameworks, publicada en GitHub Pages desde la rama `main`.
 - Actualización automática cada 2 minutos con la app abierta (no interrumpe si se está escribiendo).
 
 ## Cómo está armada
-- `index.html` (carga solo `style.css` y `script.js`; la librería de Excel se baja recién al exportar), `script.js` (casi toda la lógica), `style.css`, `manifest.json`, `sw.js`, `img/` (fotos de productos y logo del PDF).
+- `index.html` (carga solo `style.css` y `script.js`; la librería de Excel se baja recién al exportar), `script.js` (casi toda la lógica), `style.css`, `manifest.json`, `sw.js`, `img/` (solo el logo del PDF).
 - Datos en el celu (`localStorage`) y sincronizados con Google Sheets mediante un Apps Script (`API_URL` en `script.js`). Los ajustes sueltos (vehículo, monotributo, mensaje general) viajan en el registro `vehiculo`.
 - Sincronización: cada registro tiene `actualizadoEn`; al fusionar gana el más nuevo. **Todo cambio a un pedido, cliente o producto tiene que poner `actualizadoEn = Date.now()`**, si no otro dispositivo puede pisarlo. Ojo: si un dispositivo guarda un producto con stock viejo puede pisar el stock del otro (riesgo conocido, pendiente de resolver).
 - Stock: `aplicarStock` mueve el stock de los pedidos entregados; los borradores y los productos con `pendiente` no se descuentan hasta entregarse.

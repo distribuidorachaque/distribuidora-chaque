@@ -839,18 +839,6 @@ function abrirModalCliente(id) {
   document.getElementById("modalCliente").style.display = "flex";
 }
 
-// ── Ver imagen del producto ────────────────────────────────────────────────
-function mostrarImagenProducto(nombre) {
-  const src = IMAGENES_PRODUCTO[nombre];
-  if (!src) return;
-  document.getElementById("imgProductoModal").src = src;
-  document.getElementById("modalImagenProducto").style.display = "flex";
-}
-
-function cerrarModalImagen() {
-  document.getElementById("modalImagenProducto").style.display = "none";
-}
-
 function cerrarModal() {
   const m = document.getElementById("modalCliente");
   if (m) m.style.display = "none";
@@ -1179,7 +1167,6 @@ function autocompletarProducto() {
     ${!esPublico && prod.precioPublico > 0 ? `<span class="price-hint muted">Público: ${formatCurrency(prod.precioPublico)}</span>` : ""}
     ${esPublico ? `<span class="price-hint muted">Mayorista: ${formatCurrency(prod.precioVentaSinIVA)}</span>` : ""}
     <span class="price-hint stock-hint ${claseHint}">Disponible: ${disponible}${disponible > 0 && disponible <= STOCK_BAJO_UMBRAL ? ' ⚠️' : ''}</span>
-    ${IMAGENES_PRODUCTO[prod.nombre] ? `<button type="button" class="price-hint" style="border:none; cursor:pointer;" onclick="mostrarImagenProducto('${prod.nombre}')">📷 Ver imagen</button>` : ''}
   `;
 }
 
@@ -3152,14 +3139,6 @@ function renderApp() {
           <button class="btn-danger" onclick="eliminarClienteActivo()">Sí, eliminar</button>
           <button class="btn-gray" onclick="cerrarModalConfirmar()">Cancelar</button>
         </div>
-      </div>
-    </div>
-
-    <!-- Modal: ver imagen del producto -->
-    <div class="modal-overlay" id="modalImagenProducto" style="display:none;" onclick="cerrarModalImagen()">
-      <div class="modal-card" style="text-align:center;" onclick="event.stopPropagation()">
-        <button class="modal-close" onclick="cerrarModalImagen()">✕</button>
-        <img id="imgProductoModal" style="max-width:100%; border-radius:10px; margin-top:10px;" />
       </div>
     </div>
 
@@ -5863,10 +5842,6 @@ function renderVistaResumen() {
     <div class="form-card">
       <div class="table-header-row">
         <h3 class="section-title" style="margin:0;">📦 Productos vendidos</h3>
-        <div style="display:flex;gap:6px;">
-          <button class="btn-sm btn-outline" onclick="exportarExcelDia('${fechaMostrar}')">📥 Día</button>
-          <button class="btn-sm btn-success" onclick="generarExcelModelo()" style="color:#fff;">📊 Mensual</button>
-        </div>
       </div>
       ${productosOrdenados.map(([nombre, p]) => `
         <div class="stock-row">
@@ -6255,26 +6230,6 @@ const BLISTER_12 = ["Almendra", "Chocolate", "Proteína"];
 // redimensionado a 384px de ancho (el ancho estándar de una térmica de 58mm),
 // listo para mandarlo a RawBT antes del texto del remito.
 const LOGO_TICKET_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAYAAAAF/AQAAAABoeCPeAAABCGlDQ1BJQ0MgUHJvZmlsZQAAeJxjYGA8wQAELAYMDLl5JUVB7k4KEZFRCuwPGBiBEAwSk4sLGHADoKpv1yBqL+viUYcLcKakFicD6Q9ArFIEtBxopAiQLZIOYWuA2EkQtg2IXV5SUAJkB4DYRSFBzkB2CpCtkY7ETkJiJxcUgdT3ANk2uTmlyQh3M/Ck5oUGA2kOIJZhKGYIYnBncAL5H6IkfxEDg8VXBgbmCQixpJkMDNtbGRgkbiHEVBYwMPC3MDBsO48QQ4RJQWJRIliIBYiZ0tIYGD4tZ2DgjWRgEL7AwMAVDQsIHG5TALvNnSEfCNMZchhSgSKeDHkMyQx6QJYRgwGDIYMZAKbWPz9HbOBQAAAU5ElEQVR4nL2cz48mx1nHP11vZ94OmUx3ggQj5Ozbkg+RUA4TLhhY9u0kF9/gyCmMxD+wASF8WPzW2otsAZL9B1jK3DhzgwN2rdeKc8KLkBAnXLM2yqBgucaekJ51Tz8cqqp/vT2zM0rgOcy83VXffn7UU089VV3VyCxpSOZLmLvZAsDm2gDtAbM85gCWQMvrARo6Wl8LYHrA4jqABmAlUs+z2AYYCDdnWWwB2v65zZxptwAO8rnfkRQTepPExd+55rNp+ZRDA6v+qt5Wewpw4/bVWzJNAZMabss/JoDWy9h0bbAl0wTgWEpoM6+Mnco0ARjWnXfDRqSZtt0EACJivOCaRbxzKaBhKdJERTVrETs08xbAshYxnT+wCM+4FKARaXo1a9YiE8OOAC0LETuooJdDhtuAhpXI2DUCm0sAjo3UY9dYSTtuiRHAJCJmVOwWInpxKYClyFjiFhHLZYCGldSThjWriRLDDtRwyMlz4+7ywgk72OGdAdgmU4m8THrYdEOAWUqzFSbMWuziEgC5uHwKcLm4YaWBDhcc8PjutM/vnbFLNatDjUjXam4Vf+lx4w8ANpGmU683vl2PtB4AzLJ/btvHvDofaT3Qwezz+ND/fKjgH7X/vXPGfjunQ8u6U0F3UUNEtDSD1ukBDdJGWbugISJiNzJwjh5QJ1KvIhb6OFyvROddtV6Hkx1ODqNTDWnnhMN6RgeTiwk/HTAYEhfiFjMcTMH3ws9szOefyAZm6o20afJ5Dm7d9mbqAA2dzmGg7hStVwMzdSI1SafzRen/Vb3W2m6J5JadztEkHYuF2HyLg8t4xJTOPa+3KXq7RqRe+XZ2f9JxWIr1ittNH606AOtmJSJikg7AvTA41OumqxdFEkxTAhh52jdNUDx9vEBPRGoSsZ4TbEyvhbf0UvR6wqFRHAOcA+Z5zZjuUXV27a36amzkjbB8s1NcRORhb9cIsHmbi/iusxby4cAo4jZuOQGYlTeSlzv5YZdmrb2ZupgbdTClN5IGHO6QcqhDatPIMgJ0VVex+LTa6+taAOWUjJVuEzmWqANr6TM/L/trojcjkVrFE6JIXsbw/xyA21TxhsfVS1mKxKzhzjoEjtvRTFbsamQlF6zapSW+f653wxPdJsb1IJIr2gKg8zsPsJ8tTwHITFaPrGS9VeWxv/yY1/1zErsX7dqMAMZb9WlnWq98zX6o5lRsiKDKxg5UgJf9g5I6doNly1DpFnkoMsjrn/u+/38YrC+vxuEyiJTwLiBlBHDL/zuK1v9+10IiItIsZCnDicC9TrhgfidmPeDQpJIxDMI/7Vra+X+ZLu3ASnXWFgxagbeW6BSAwt9ITeEGAFc0Zf80AN7nrxmSDS3nAbaMzr0TxXoxOQDgo9LXc6HlgpUqpwELX14YgLQ+CFq0nwCQ1KGm/2dIwoOLbtT/RmjaMz9a3CNch+Z7FHx77W9/TS7eihr5KPkotLECkIT3gBYwPu6tXmq/HdX1vfAWWnccmoXkwZPEwWGxqP/s80edzZbDlvM6pFIAKVA5+LdvsXztQdkBGoBMl73SDW0JLCzUFl6soHXY2wHQAqQmZHK+g9Yb8ZEityRybyntNz9PYsMvRETale+kKhgTIFj0Ft87ITm52BmM5hAHY0RE7NqJiDRkJJbPRT4V+cCtxnbNfTKlACy+q1OgSj6p7M+B7LCzKwAveeUVgKmeeN0PkYTSuj2o0Z2ZCoDbvld7Hbwr17sP7qkdcPvpCb8BH70SADXAraTXIZHXRETcWtrdPXZ+/fP2D+TUyaNlACxFRI5FRx0EH4ZODcm7v0lykiUG4L3f3vGABiAPsUdE2kW7EhH5XMTPDc/lDTk9lbzNTW+memM2gUOb+uFj9yIrccjvL6jA3S8A7sCpBUgpTVC6Ca4ufOGwsPhu8gJKdJkUZfbQJHtfB8D7hgLImgrgqW5rvgXVIY0feuzip5SKXQBli2glt3I+9sBS2n2EvYV8DnIh7/9ELJ/60JTXuYwnHAW8TvLx7c/cD97mE9Zgs384LmNAju0uYtfHEnqoiIh8KmLFspHmh/+81l0u91qzDBysH99akt+LnIqKhUYdfWb6R9+miUpXsXne60qtvQ1UD2sNL4V7Kv4x+j0IHiP6CGDXmQpg5wu6AfVW0gYdtLwhIgKsRdYffiEi7RIRae+sHJ0Op5KEASWRPOi8EHnng3PvYyIiL6zd13Sc7jrREdCuAgCRD39yISKiExGRQpwQ5x71RnsriaIEngJo+BUBqBTADzhFw328M1XaK+0zlacl8AAkBShTbxKfUPwWAKY0oKD1dv2qAVo5GOQbpKSnGvigsyoKmqwfqiT5939tjiAElQzzuG85W1hApM4734OV82mKz/G6TG4jIpK7lQgibnUaXQnyeiWvdoBV5J2LiLxR58FbHdFKFH9juQMxGJ4tulW/4AoKXKm6Sw7vQUnI3DgvbkMFqgao0jqobju9DEDemeCECg4IA1qMfLZKo1m+/TsayKIQLRjIoDUApWpiqIyPfHGn41UCDeVj+C8DLwS8B+gQyFn8lQZITXzG4sMz+LUSqQCKxAOMb9oTuJdoABV1qnd5G7IiaCm0oCDxJvT3OhsCuIIDr53zWmpQoCUa6HUSA5y7XpHl0IZaQIH3btHACRYuvhzHKluRasxOaMaUCpSXDH4EZG8dn8AZ50GwSsPRsU1inmPQfdRoAP68PC94DEdU+CxafVwatB/SFCUoWp/XVACp6DMqcGAhSyC5UI/frEIfsRjPQYeB7+7P4OIvOfB+de5j0Df+/s3nfbt4B5Emd8G59zfvS2JYiEnE5GJYisjpqs6l9BOV3K1F0XS5EvJHsnfALi+IVzEDlja9y39422osqksDYJ/D9mCXA3bQJaIpgFQvDPCf+KYDcatjEWlgUYvUG0lEWtZ2WfuO2ebyjkjJRkReq3NB3OojEal9DuJni8LKLl2IX+/Lh2HFUN6vc1FQWrqU9Tj4gAPnPZEDspgKNimkOFJgB+4B797xiBps6BsZX4Ps4R2gpEaFJgtd4kHwiQZM7CUsYfkCvq1920AceEOlsgXdWQ+Cb+4BCssgTz8Y1CmHAJ+I06Dw6aVXuq38/UKQ0ToXMV0FMbISEce+iDTeqlJzmM68N6hlISp098d886LsJhApl1CLIgmOUy10mEeCwjTJTH3tO1AJ6EP4Qx53RXbu+SmgwvCRaMjku6EkiWpOSUAWzVpEFv8tYvsFH2ZfhzRrIwrf1M/9Khz1aYj2/C+CP3WqQZiJSwm80xxOJHjAA+6PMFr5Rm4ruKgaPa5/obkY3bKgSNFe50aPLJnBGXA0uJVQRlso4Jx+VaYC4DFwMpFStd107+s0F0mSJGVXaGDwEMBhFFlMkdMQDkKvK7xLj+K5LgbNk9j4K7IYLmn2IvU/O8DH4f94QTECmm4G+uN4rw1MahbDN2FAjVUUkUkRb0exHc/50bCjKhuIdHHU/TRRxkN2mFAP+FnV/bQRpxk7E6DqWPw/GhYN0oTxpvReXg1rNzgVcq8uMrGoY1PqHSaxo0wHIhXxx7KzZza8vaVDTyZOJ4aMrwKUcbWqYBJAWlCuT00GwhVASzl9YkGtqKZMfYoQaRxt1KxIXRytZgrnAGokpR4XXhoUu7qbwQ2fnOhpvWQ+7gX2dqtpItXb0TWjUdsMZngOmM9G0NGqzlSky4tuAKiuBMgVZVukUROP91TDrCIprTJXsJ8hreaGsqvol2Ol8v+cw9WA2RgNUMyUmBty8PlSdTOMnrlphxc/HhVt7xPYQj0d354H+Mjj3fKdkQyVupxFjFfmGhwC6ZFs1wAMUFcDvBApBpCJZ/2SfKnw/yzbo/ssQOPAKRzbIflKkeqZe3OAoGcSQPraHPRTGGSmlwNaKi+PACZ5NiCsqFGhfVb4LEAUu+SIi+mQMwdwgU/BCWfTgXoOYBPvHBnnm2I63swBKgBaUnhlK0jNAM5jBq8G8KsAmddTQsvpqwAXKUkCWRgzNLDgKkCgIlQ/ZHsgnwUctgCGfZgsVF7q3gCWHbbnNnOARUzJEstyWqhmIu5z3Ri3ur/VJWZb2jtHDbw8LTMzgFUQfDb1JtXDq0VoAAOXJPeJmoZCIJhpvBIUadasFwM+I2ovyfrO/L/H2yXVPIdQ87PriuRXxPr/zwQ8iT/evR7guCT43NyAprbTpXIg3FbWjKqmdy6GqPNkwkSrLQf2HtH1m8GbTGhQimnCdALsUnXPGU1G9YzSR8ABqotHUx/0yxqRcr+wW9PS4Fdqh+sbtSzGHB6eFq8AizpJWGj+RcxKprHSbDoOQeq1zd1CtFiWUi/jzjjPoV2osk83vT0SY++6FHRhG9KGg4GL1KRpH9rCsske32kfZlTvZG+1LC7Ixm470OFkZdc1HMgOpqA06UJAV6k0Z7FKMp5PW8yypmr30SUFyhjN4WP04uV5Dt/j74BEnx0KhszCgaE4VYY/HlrJrl8L6yi55CJ2IU7qRKRZtus6l+ZuvpJ6Hax02izT7t3sewcXB/D835JLtoTFU+AMlf/pHjtRa/eVrBPp4jvmzHD+XIEo9oF3NOlFBX/xEskPdK+AW7/vW20lj0SsrMV5b6hX65aVrGUh3e6ij5q8c+OVlXuGb/684jFrgKUmab7CIZ9APvBAt3oUV49E2k0jEheWPvhA5CP5QNqossijOqdefTRcczqVblOSiMi5/HxY+n69mvaHPRZucLlzrQn4laRwl6b322RqVHrpXHSGMsr/jxlKfflUcYu0Q6ktw11BRXgpdjORmivm2xMSQD1jHWFMpeWmc1EdV6WvRS2gaBVwmmQk6+SNJPlyUpwukvRUHX8peZiUXCT6OClJMoDKdAu0PIXW/z6jG6k54YyjQcj3qw4WQHQM7ENnbHC4LuQ3vqKsRNpcr4/dvb1beZ6bdvXQvpw369fqlxFzb9ms7otdi0gtiagQZYqXLLxKWWgOoNz3hkgsD19tFFV8XeUTBwehNbw+um+bQr/C21D6Fc8av5ijAZSLo93QtzKTsoLw1ET8y6Da6z+3wpHGkTqN/+KqNNSg74LemvkUAEYHLn2Cpf0AqnEa/Gt9wBagsUH+FhRFvw74JDHcPS2BF0c8jr/r9zZYMhTYshNYR22M9rdUCxmkXu40vITst7kdAdsrppD5VjaAIuviTGJcKJ1OAg7ktAIyCtRwleeFGv8aNalNx5WaWzZc1X5lvbP/Mt4lDVV6R2wB7VfWa982ms+8IJpBuCoBkhBOCxdKdBS9gWn64nzx+tPgCQo1iAJV9yf4VeNfQL4U2VUoaMJUHpnJuauaY0LLt/51QljrawvCbpjSgxqAE+5h4LZ/pVz5jKzFAmdl8DAEaMqaCjjSF7wSuQVR5L6sxMGGu7u5S+rEFUtY37cvY0jEsLQLy8rkUst9vxPBN53GxKzlC6ikfBlQ/v2dpxodlos0sIBEH0T7JvowAdgl69+gJeB7ks6Ae1BV4mPtl8732N9RsHAsMafB29xXYySuyAUE1jS0fAqwrBEaQMgbBJy3poLSzE+Ptsi2aXCN8nqAsMGCwl5zpDZNFjgU1wOEda1uN8UzKXersDki06fJM6mUIuiQ1ulVq8qRHLgydi1zHRXaMnBQjbqe2pWtIIWkxebXyB/OMTqI1J8xuopqDQz3/jyLnCQSd0jNrW1tkd8vp4BK3766qqcnogLg+qlAAJRxc+rV9F7r12z6bWHPcqWtbWHwUA8uLslzRKQOexilYS8n0bSQS00uJHqHsCm2XblV5FCnXu0zzvon/Xh4AbR+o6UiDr6AG8ZV06U0garuVZVqwtTWDsv1ZNxqsFUA0AZnMkPdJtfU2kSl455EITe5y91SLNJwh7XN3drm/tTCYE9ifPskHBxA6OwNDwdHEoCw2curG52pf9WmWVC5YfUnvssogMrcgi7nA2xFPY1v77WqA5Rhj1PSDXca0onXv95FPihspoFmMNzi+vi2tIAUw23DQVjVd1aznfT78dwHsugbAKcFPCwBwoa00xKgLV3RAdJ+j9Ol1HjPCCI1W3Fj6wF1aBVvqrbbd+hJb3M4xW86TAESYRwGpFwNrhzAk1taepG07v06d12lQAWAkaQXiSpks2GpLsTN0G65BXgQqoaWMkUQ+2go2WCyI/HAjgeUNjNASxtnCvU0GhZNOgAULh09cFlT9Hqcl9CWIXHzgKxWFsJIDm2WQjNK25vKN3QApE3iQKHrWKfJfFYUudQ65MNB9dByJpYDQlUU3bL3aezgKpb+LiQ8KgugboCUb1BS2wB/gg5QHzcRKyIa1iQag+EOsHF+TXclsoxnMQIHrQsN1WDhPcHnRdo/NgsNHUWqTGagHLqdJiGNEbktWjUClDa1UAwj9iE7dKuxTRnaLd4onHKwx+CIy3Psk+jd8K6m6gzuVQnnUC4G48fo0GV/DiVwSBvuMQwacDJcZD7u5jFRlZbvMybLm/3Fj0J/60QSNm4zHtLM8HRe3h0cikJok5kxh+dtb7K2uIgXEVDZOCnprDR489CUjZoASqfcRIllb4K6qvsVW0/x1NSQHnW/Bqem4lOyJqyuDqgPPe8Sdof3IqUtqymgpweYciJSi7j1VKZITd4fPN06vTZHc6fX0FZNN0N1dFIN9q1FpM23zdQbqT+oOHfGb4tmz/hlTyn1vESSclT0V9ESg3OKU51nzykqdOrmOdTlcPtg9xy9kpn9ciIiZtj7Zk9zbuk8e5qzrC/RWlJcH9h7QPGU/aM5wNN9jgZxvOM1PPM6ovGZ156DokqezjDgSF8MX132T9IrMZttBu1iFKIuORk8oMtPBpdP2Z1x2JMDjoZrh4NHDU83DyS99HRzw3pGiXYhzfDU+C9yQhtds3s2VeHxAW6U5w/ANpn5MMRVp8xrNt0w0N1bSjv6BMGNT8r/Qmfxb37a/8bfE7jkiwWrYZ3RLEtxAvZJf+P1JZxwyCXtEL+6sOoZrK/+6kL8rkNX+MzvOtQ3/XKE5z/6NoWe1hhf3vjrFzf+vkYT3jLF+s/8gkf3jZAwftXP+kaI2OlXSKaxbQq48XdORA9Z6C2JfgnfatmD0yq4WQF3twLb9Ak3/t7Mzb9oc+Nv5tz8qzxXf/cnmVuJiqFxrmzLrNAtAm/mymY5eB7zJf8Ll4sE1Gig/EgAAAAASUVORK5CYII=";
-
-// Imágenes de productos para mostrarle al cliente mientras armás el pedido.
-// Cada foto es un archivo en la carpeta img/productos (se baja solo cuando
-// tocás "Ver imagen"). Para agregar otra: subí el archivo a esa carpeta y
-// sumá acá una línea: "NombreExacto": "img/productos/archivo.webp"
-const IMAGENES_PRODUCTO = {
-  "Almendra": "img/productos/almendra.webp",
-  "Chocolate": "img/productos/chocolate.webp",
-  "Proteína": "img/productos/proteina.webp",
-  "Bites": "img/productos/bites.webp",
-  "Bisglicinato de Magnesio": "img/productos/bisglicinato-de-magnesio.webp",
-  "Multimagnesio": "img/productos/multimagnesio.webp",
-  "Citrato de Magnesio": "img/productos/citrato-de-magnesio.webp",
-  "Magnesio": "img/productos/magnesio.webp",
-  "Calcio, Magnesio y Vitamina D3": "img/productos/calcio-magnesio-y-vitamina-d3.webp",
-  "Vitamina C, Zinc y Vitamina D": "img/productos/vitamina-c-zinc-y-vitamina-d.webp",
-  "Vitamina B12": "img/productos/vitamina-b12.webp",
-  "Colágeno Hidrolizado": "img/productos/colageno-hidrolizado.webp",
-  "Resveratrol": "img/productos/resveratrol.webp"
-};
 
 function precioPorUnidadTexto(p) {
   if (BLISTER_12.includes(p.nombre) && p.categoria === "Vita") {
@@ -7165,139 +7120,6 @@ const PRECIOS_DISTRIBUIDOR = {
   "Melena de León": 9500,
   "Reishi": 9500,
 };
-
-function generarExcelModelo() {
-  if (!window.XLSX) {
-    const s = document.createElement("script");
-    s.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
-    s.onload = () => _crearExcelModelo();
-    document.head.appendChild(s);
-  } else {
-    _crearExcelModelo();
-  }
-}
-
-function _crearExcelModelo() {
-  const [y, m] = fechaResumen.split("-");
-  const mesNombre = new Date(parseInt(y), parseInt(m)-1, 1)
-    .toLocaleString("es-AR", { month: "long" });
-  const mesCapital = mesNombre.charAt(0).toUpperCase() + mesNombre.slice(1);
-
-  // Filtrar pedidos del mes seleccionado
-  const pedidosMes = orders.filter(o => {
-    if (o.borrador || o.eliminado) return false;
-    const partes = o.fecha.replace(/,.*/, '').split('/');
-    return parseInt(partes[1]) === parseInt(m) && partes[2] === y;
-  });
-
-  // Sumar cantidades por producto
-  const cantidades = {};
-  pedidosMes.forEach(o => {
-    o.items.forEach(i => {
-      cantidades[i.nombre] = (cantidades[i.nombre] || 0) + i.cantidad;
-    });
-  });
-
-  const wb = XLSX.utils.book_new();
-  const marcas = [...new Set(catalogActivo().map(p => p.categoria))].sort();
-
-  marcas.forEach(marca => {
-    const productos = catalogActivo().filter(p => p.categoria === marca);
-    if (productos.length === 0) return;
-
-    const dataRow = 7;
-    const lastRow = dataRow + productos.length - 1;
-
-    const rows = [];
-    rows.push([`${marca} - Margen de ganancia por producto`,"","","","","","","","","Resumen",""]);
-    rows.push(["Distribuidora Chaque","","","","","","","","","Costo total",{f:`SUM(F${dataRow}:F${lastRow})`}]);
-    rows.push(["","","","","","","","","","Venta total",{f:`SUM(G${dataRow}:G${lastRow})`}]);
-    rows.push([`${mesCapital} ${y}`,"","","","","","","","","Ganancia total",{f:`SUM(H${dataRow}:H${lastRow})`}]);
-    rows.push(["Producto","Precio distribuidor","Precio comercio","Ganancia por unidad","Cantidad","Costo total","Venta total","Ganancia total","","Stock inicial","Stock actual"]);
-    rows.push(["","","","","","","","","","",""]);
-
-    productos.forEach((p, idx) => {
-      const r = dataRow + idx;
-      rows.push([
-        p.nombre,
-        costoDeProducto(p),
-        p.precioVentaSinIVA,
-        {f:`C${r}-B${r}`},
-        cantidades[p.nombre] || 0,
-        {f:`B${r}*E${r}`},
-        {f:`C${r}*E${r}`},
-        {f:`D${r}*E${r}`},
-        "",
-        "",
-        p.stock
-      ]);
-    });
-
-    rows.push(["TOTAL","","","",
-      {f:`SUM(E${dataRow}:E${lastRow})`},
-      {f:`SUM(F${dataRow}:F${lastRow})`},
-      {f:`SUM(G${dataRow}:G${lastRow})`},
-      {f:`SUM(H${dataRow}:H${lastRow})`},
-      "","",""
-    ]);
-
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws["!cols"] = [28,16,14,16,10,14,14,14,4,12,12].map(w => ({wch:w}));
-    XLSX.utils.book_append_sheet(wb, ws, `${marca} - ${mesCapital}`);
-  });
-
-  XLSX.writeFile(wb, `Ventas_${mesCapital}_${y}_Chaque.xlsx`);
-}
-
-function exportarExcelDia(fecha) {
-  if (!window.XLSX) {
-    const s = document.createElement("script");
-    s.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
-    s.onload = () => generarExcel(fecha);
-    document.head.appendChild(s);
-  } else {
-    generarExcel(fecha);
-  }
-}
-
-function generarExcel(fecha) {
-  const pedidosDia = orders.filter(o => !o.borrador && !o.eliminado && o.fecha.startsWith(fecha));
-  if (pedidosDia.length === 0) return alert("No hay ventas para esa fecha.");
-
-  // Hoja 1: Detalle
-  const detalle = [["Fecha","Cliente","Tipo","Producto","Marca","Cantidad","Precio s/IVA","Subtotal s/IVA"]];
-  pedidosDia.forEach(o => {
-    o.items.forEach(i => {
-      detalle.push([o.fecha, o.client.nombre, o.client.tipo||"", i.nombre, i.categoria, i.cantidad, i.precioVentaSinIVA, i.subtotalSinIVA]);
-    });
-  });
-
-  // Hoja 2: Resumen por producto
-  const agg = {};
-  pedidosDia.forEach(o => {
-    o.items.forEach(i => {
-      if (!agg[i.nombre]) agg[i.nombre] = { marca: i.categoria, cantidad: 0, total: 0 };
-      agg[i.nombre].cantidad += i.cantidad;
-      agg[i.nombre].total += i.subtotalSinIVA;
-    });
-  });
-  const resumen = [["Producto","Marca","Unidades vendidas","Total s/IVA"]];
-  Object.entries(agg).sort((a,b) => b[1].cantidad - a[1].cantidad)
-    .forEach(([nombre, p]) => resumen.push([nombre, p.marca, p.cantidad, p.total]));
-  const lastRow = resumen.length + 1;
-  resumen.push(["TOTAL", "", `=SUM(C2:C${lastRow-1})`, `=SUM(D2:D${lastRow-1})`]);
-
-  const wb = XLSX.utils.book_new();
-  const ws1 = XLSX.utils.aoa_to_sheet(resumen);
-  const ws2 = XLSX.utils.aoa_to_sheet(detalle);
-  ws1['!cols'] = [28,12,18,16].map(w => ({wch:w}));
-  ws2['!cols'] = [18,20,12,28,12,10,16,16].map(w => ({wch:w}));
-  XLSX.utils.book_append_sheet(wb, ws1, "Resumen del día");
-  XLSX.utils.book_append_sheet(wb, ws2, "Detalle ventas");
-
-  const [d,m,y] = fecha.split("/");
-  XLSX.writeFile(wb, `Ventas_${d}-${m}-${y}_Distribuidora_Chaque.xlsx`);
-}
 
 // ── Indicador online/offline ──────────────────────────────────────────────
 function initOfflineIndicator() {
