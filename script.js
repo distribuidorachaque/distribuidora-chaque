@@ -527,7 +527,10 @@ async function forzarRecargaDrive() {
     if (dP.length > 0) orders = fusionarPorId(orders, dP.map(r => JSON.parse(r[0])));
     if (dI.length > 0) inversiones = fusionarPorId(inversiones, dI.map(r => JSON.parse(r[0])));
 
+    const nuevosWeb = aplicarPedidosWeb(await traerPedidosWeb());
+
     guardarLocal();
+    avisarPedidosWebNuevos(nuevosWeb);
     // Si la fusión agregó algo que Drive no tenía, hay que empujarlo de
     // vuelta — pero recién después de soltar el seguro syncEnCurso.
     necesitaPush = clients.length > antesC || catalog.length > antesCat || orders.length > antesP || inversiones.length > antesI;
@@ -572,6 +575,8 @@ async function sincronizarSilencioso() {
     if (dP.length > 0) orders = fusionarPorId(orders, dP.map(r => JSON.parse(r[0])));
     if (dI.length > 0) inversiones = fusionarPorId(inversiones, dI.map(r => JSON.parse(r[0])));
 
+    const nuevosWeb = aplicarPedidosWeb(await traerPedidosWeb());
+
     necesitaPush = clients.length > antesC || catalog.length > antesCat || orders.length > antesP || inversiones.length > antesI;
 
     // Solo se vuelve a dibujar la pantalla si llegó algo nuevo (así no te
@@ -579,6 +584,7 @@ async function sincronizarSilencioso() {
     if (JSON.stringify([clients, catalog, orders, inversiones]) !== fotoAntes) {
       guardarLocal();
       renderApp();
+      avisarPedidosWebNuevos(nuevosWeb);
     }
   } catch (e) {
     console.log("Sync silenciosa falló:", e);
@@ -633,7 +639,7 @@ async function guardarAhora() {
 async function cargarDatos() {
   syncEnCurso = true;
   sincronizarConfigVehiculo();
-  let dC = [], dCat = [], dP = [], dI = [];
+  let dC = [], dCat = [], dP = [], dI = [], filasWeb = [];
   try {
     const [rC, rCat, rP, rI] = await Promise.all([
       fetchConTimeout(API_URL + "?tipo=clientes"),
@@ -648,6 +654,7 @@ async function cargarDatos() {
     if (dP.length > 0)   orders  = orders.concat(dP.map(r => JSON.parse(r[0])));
     if (dI.length > 0)   inversiones = inversiones.concat(dI.map(r => JSON.parse(r[0])));
 
+    filasWeb = await traerPedidosWeb();
   } catch (e) {
     console.log("Modo local:", e);
   }
@@ -685,7 +692,11 @@ async function cargarDatos() {
   // Deduplicar inversiones por ID, quedándose con la versión más reciente de verdad
   inversiones = fusionarPorId(inversiones, []);
 
+  // Pedidos nuevos de la web (recién ahora, con los pedidos ya fusionados).
+  const nuevosWeb = aplicarPedidosWeb(filasWeb);
+
   guardarLocal();
+  avisarPedidosWebNuevos(nuevosWeb);
   // Si el usuario ya está completando un formulario (cargando un cliente o
   // armando un pedido) justo cuando termina de sincronizar, no le pisamos
   // la pantalla — los datos ya quedaron guardados igual, se van a ver la
@@ -1488,6 +1499,7 @@ function renderPedido() {
         return `
           <tr>
             <td>${item.nombre}
+              ${item.sinProducto && !catalog.some(p => p.id === item.productId && !p.eliminado) ? `<div style="font-size:12px; color:#dc2626;">⚠️ No está en tu lista: sacalo y agregalo desde tu lista</div>` : ""}
               <label style="display:flex; align-items:center; gap:4px; font-size:12px; margin-top:3px; color:${item.pendiente ? "#92400e" : "#6b7280"}; cursor:pointer;">
                 <input type="checkbox" ${item.pendiente ? "checked" : ""} onchange="toggleFaltaItem('${item.id}')" style="width:auto; margin:0;" /> ⏳ Falta entregar
               </label>
@@ -1668,6 +1680,7 @@ function guardarYEntregarPedido() {
 
   const idx = orders.findIndex(o => o.id === editingOrderId);
   if (idx === -1) return;
+  if (avisoProductosWebSinResolver(currentItems)) return;
 
   for (const item of currentItems) {
     const prod = catalog.find(p => p.id === item.productId);
@@ -1731,6 +1744,7 @@ function toggleModoBorrador() {
 function confirmarEntrega(orderId) {
   const order = orders.find(o => o.id === orderId);
   if (!order) return;
+  if (avisoProductosWebSinResolver(order.items)) return;
   // Verificar stock
   for (const item of order.items) {
     const prod = catalog.find(p => p.id === item.productId);
@@ -4127,7 +4141,7 @@ function renderOrderCard(order) {
   <div id="order-card-${order.id}" class="order-card ${order.pagado ? 'order-pagada' : 'order-pendiente'}"${order.id === pedidoRecienEntregadoId ? ' style="box-shadow:0 0 0 3px #059669;"' : ""}>
     <div class="order-top">
       <div>
-        <div class="order-cliente">${order.client.nombre}</div>
+        <div class="order-cliente">${order.web && order.web.nombre ? "🌐 " + order.web.nombre : order.client.nombre}</div>
         <div class="muted order-fecha">${order.fecha}</div>
       </div>
       <div style="text-align:right;">
@@ -5032,6 +5046,173 @@ function renderVistaPedidoWeb() {
     </div>
     ${detalle}
   `;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PEDIDOS QUE LLEGAN DE LA WEB (pestaña "pedidos_web" de la planilla)
+// ═══════════════════════════════════════════════════════════════
+// El script de la web agrega una fila por pedido (JSON en la columna A). La
+// app SOLO LEE esa pestaña con el doGet de siempre (?tipo=pedidos_web) y NUNCA
+// escribe en ella: el guardado de la app borra y reescribe la pestaña entera.
+// Cada pedido nuevo (id "W-XXXXXX") entra como PENDIENTE DE ENTREGA (borrador,
+// no toca el stock) en el cliente especial "🌐 Venta web"; el stock se
+// descuenta cuando se confirma la entrega. La app anota el id en el pedido
+// (id "web-W-XXXXXX"), así un pedido no se importa dos veces ni desde otro
+// dispositivo.
+// Lo que viene de la web lo escribe cualquiera: se limpia todo texto para que
+// no pueda meter código en la app.
+function textoWebSeguro(valor, max) {
+  return String(valor == null ? "" : valor)
+    .replace(/[\u0000-\u001f\u007f<>"'`\\]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, max);
+}
+
+// Lee la pestaña. Si falla (sin internet, clave mal, la pestaña no existe
+// todavía) devuelve [] sin molestar: el resto de la sincronización sigue igual.
+async function traerPedidosWeb() {
+  try {
+    const resp = await fetchConTimeout(API_URL + "?tipo=pedidos_web", null, 45000);
+    const filas = await resp.json();
+    if (!Array.isArray(filas)) return [];
+    const pedidos = [];
+    filas.forEach(f => {
+      const texto = Array.isArray(f) ? f[0] : null;
+      if (typeof texto !== "string" || texto.charAt(0) !== "{") return;
+      try { pedidos.push(JSON.parse(texto)); } catch {}
+    });
+    return pedidos;
+  } catch (e) {
+    console.log("No se pudieron leer los pedidos de la web:", e);
+    return [];
+  }
+}
+
+// Producto de tu lista que corresponde a un renglón del pedido web. Si la
+// web avisa que no lo encontró en el catálogo (enCatalogo: false), no se
+// adivina: queda marcado para revisarlo a mano.
+function productoDeRenglonWeb(it) {
+  if (it.enCatalogo === false) return null;
+  let prod = it.productId ? catalog.find(p => p.id === it.productId && !p.eliminado) : null;
+  if (!prod && it.codigo != null && String(it.codigo).trim() !== "") {
+    prod = catalogActivo().find(p => codigoDeProducto(p) === String(it.codigo).trim());
+  }
+  return prod || null;
+}
+
+// Convierte una fila de la web en un pedido de la app. Devuelve null si la
+// fila no sirve (id raro, sin productos).
+function pedidoDesdeFilaWeb(w) {
+  if (!w || typeof w !== "object") return null;
+  const webId = String(w.id || "");
+  if (!/^W-[A-Z0-9]{6,12}$/.test(webId)) return null;
+  if (!Array.isArray(w.items) || w.items.length < 1 || w.items.length > 40) return null;
+
+  const items = w.items.map(it => {
+    const prod = productoDeRenglonWeb(it);
+    const cantidad = Math.min(500, Math.max(1, Math.round(Number(it.cantidad) || 1)));
+    const unit = Math.min(10000000, Math.max(0, Number(it.precioUnit) || 0));
+    const sub = cantidad * unit;
+    const item = {
+      id: generarId(),
+      productId: prod ? prod.id : "",
+      nombre: prod ? prod.nombre : textoWebSeguro(it.nombre, 80) || "Producto sin nombre",
+      categoria: prod ? prod.categoria : textoWebSeguro(it.categoria, 40),
+      cantidad,
+      precioVentaSinIVA: unit,
+      precioVentaConIVA: priceWithIVA(unit),
+      subtotalSinIVA: sub,
+      subtotalConIVA: priceWithIVA(sub)
+    };
+    if (it.mayorista) item.mayorista = true;
+    if (!prod) item.sinProducto = true; // hay que revisarlo a mano antes de entregar
+    return item;
+  });
+
+  const c = w.cliente && typeof w.cliente === "object" ? w.cliente : {};
+  const web = {
+    nombre: textoWebSeguro(c.nombre, 80),
+    barrio: textoWebSeguro(c.otroBarrio || c.barrio, 80),
+    direccion: textoWebSeguro(c.direccion, 120),
+    notas: textoWebSeguro(c.notas, 400),
+    hora: textoWebSeguro(w.hora, 5),
+    fueraDeHorario: !!w.fueraDeHorario
+  };
+  const mapa = String(c.mapa || "");
+  if (mapa.indexOf("https://www.google.com/maps") === 0) web.mapa = textoWebSeguro(mapa, 300);
+  const lat = Number(c.ubicacion && c.ubicacion.lat), lng = Number(c.ubicacion && c.ubicacion.lng);
+  if (isFinite(lat) && isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && c.ubicacion) web.ubicacion = { lat, lng };
+
+  const total = items.reduce((a, i) => a + i.subtotalSinIVA, 0);
+  const totalWeb = Number(w.totalInformadoPorLaWeb);
+  const lugar = [web.direccion, web.barrio].filter(Boolean).join(", ");
+  const partes = [];
+  if (web.nombre) partes.push("🌐 " + web.nombre);
+  if (lugar) partes.push("📍 " + lugar);
+  if (web.notas) partes.push("Notas: " + web.notas);
+  if (web.mapa) partes.push("Mapa: " + web.mapa);
+  if (web.fueraDeHorario) partes.push("⏰ Pedido hecho fuera de horario");
+  if (isFinite(totalWeb) && w.totalInformadoPorLaWeb != null && Math.abs(totalWeb - total) > 0.5) {
+    partes.push(`⚠️ La web informó ${formatCurrency(totalWeb)} pero los productos suman ${formatCurrency(total)}: revisalo`);
+  }
+
+  const fecha = /^\d{2}\/\d{2}\/\d{4}$/.test(String(w.fecha || "")) ? w.fecha
+    : (() => { const [y, m, d] = fechaHoyLocal().split("-"); return `${d}/${m}/${y}`; })();
+  const cliente = asegurarClienteWeb();
+  return {
+    id: "web-" + webId,
+    webId,
+    fecha: web.hora ? `${fecha}, ${web.hora}` : fecha,
+    client: { ...cliente },
+    items,
+    notas: partes.join(" · "),
+    modoPrecio: "sin",
+    pagado: false,
+    pagos: [],
+    borrador: true,
+    canal: "web",
+    web,
+    // Con la hora en que se hizo el pedido en la web (sin pasarse del reloj
+    // de este dispositivo): si dos dispositivos lo importan a la vez salen
+    // iguales, y cualquier cambio posterior (confirmar la entrega, por
+    // ejemplo) siempre le gana.
+    actualizadoEn: Math.min(Date.parse(w.creadoEn) || Date.now(), Date.now()),
+    totals: { totalSinIVA: total, totalConIVA: items.reduce((a, i) => a + i.subtotalConIVA, 0), totalCantidad: items.reduce((a, i) => a + i.cantidad, 0) }
+  };
+}
+
+// Agrega a los pedidos los que la app todavía no tiene. Devuelve cuántos.
+function aplicarPedidosWeb(filas) {
+  if (!Array.isArray(filas) || !filas.length) return 0;
+  const conocidos = new Set(orders.map(o => o.webId).concat(orders.map(o => o.id)));
+  let nuevos = 0;
+  filas.slice(-300).forEach(w => {
+    const id = w && typeof w === "object" ? String(w.id || "") : "";
+    if (conocidos.has(id) || conocidos.has("web-" + id)) return;
+    const pedido = pedidoDesdeFilaWeb(w);
+    if (!pedido) return;
+    orders.unshift(pedido);
+    conocidos.add(pedido.id); conocidos.add(pedido.webId);
+    nuevos++;
+  });
+  return nuevos;
+}
+
+function avisarPedidosWebNuevos(n) {
+  if (n > 0) mostrarAvisoPedido(`🌐 ${n === 1 ? "Llegó 1 pedido nuevo" : "Llegaron " + n + " pedidos nuevos"} de la web: están en Pendientes de entregar.`);
+}
+
+// No dejar entregar un pedido de la web con un producto que no está en tu lista
+// (no se sabría de cuál descontar el stock).
+function productosWebSinResolver(items) {
+  return (items || []).filter(i => i.sinProducto && !catalog.some(p => p.id === i.productId && !p.eliminado));
+}
+function avisoProductosWebSinResolver(items) {
+  const sin = productosWebSinResolver(items);
+  if (!sin.length) return false;
+  alert(`Este pedido tiene un producto que no está en tu lista: ${sin.map(i => i.nombre).join(", ")}.\n\nSacalo del pedido y agregalo desde tu lista (o cargalo antes en 📦 Stock → ➕ Nuevo), así se descuenta bien el stock.`);
+  return true;
 }
 
 // Resumen: lo vendido por la web en el mes, comparado con el reparto.
@@ -5996,8 +6177,9 @@ function renderVistaResumen() {
             <button class="btn-sm btn-outline" style="padding:2px 8px; ${i === lista.length - 1 ? 'visibility:hidden;' : ''}" onclick="moverPedidoBorrador('${o.id}', 1)">▼</button>
           </div>
           <div style="cursor:pointer; flex:1;" onclick="editarPedido('${o.id}')">
-            <div class="stock-nombre">${i + 1}. ${o.client.nombre}</div>
-            <div class="muted">${o.fecha} · ${o.items.length} producto${o.items.length > 1 ? "s" : ""}</div>
+            <div class="stock-nombre">${i + 1}. ${o.web && o.web.nombre ? "🌐 " + o.web.nombre : o.client.nombre}</div>
+            <div class="muted">${o.fecha} · ${o.items.length} producto${o.items.length > 1 ? "s" : ""}${o.web && (o.web.direccion || o.web.barrio) ? " · 📍 " + [o.web.direccion, o.web.barrio].filter(Boolean).join(", ") : ""}</div>
+            ${productosWebSinResolver(o.items).length ? `<div style="font-size:12px; color:#dc2626;">⚠️ Tiene un producto que no está en tu lista</div>` : ""}
           </div>
           <div style="text-align:right; margin-left:auto; cursor:pointer;" onclick="editarPedido('${o.id}')">
             <div style="font-weight:600;">${formatCurrency(o.totals.totalSinIVA)}</div>
