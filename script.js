@@ -5106,7 +5106,7 @@ function textoDiagWeb() {
   if (d.error === "formato") return { malo: true, texto: `Revisé a las ${hora}: Google contestó algo que la app no entiende (por ejemplo, una página de error) y no se pudo leer la pestaña pedidos_web. Avisale a Claude.` };
   if (d.filas === 0) return { malo: false, texto: `Revisé a las ${hora}: la pestaña pedidos_web está vacía (o todavía no existe). Es decir, desde la web no llegó ningún pedido a la planilla. Si ya tendría que haber alguno, revisá que la web esté encendida y hacé un pedido de prueba.` };
   const partes = [`${d.filas} pedido${d.filas === 1 ? "" : "s"} en la planilla`, `${d.nuevos} nuevo${d.nuevos === 1 ? "" : "s"} para la app`, `${d.yaEstaban} ya estaba${d.yaEstaban === 1 ? "" : "n"} en la app`];
-  if (d.descartados) partes.push(d.descartados === 1 ? "1 no se pudo leer (formato raro)" : `${d.descartados} no se pudieron leer (formato raro)`);
+  if (d.descartados) partes.push((d.descartados === 1 ? "1 no se pudo leer" : `${d.descartados} no se pudieron leer`) + ` (formato raro${d.motivo ? ": " + d.motivo : ""})`);
   return { malo: d.descartados > 0 && d.nuevos === 0 && d.yaEstaban === 0, texto: `Revisé a las ${hora}: ${partes.join(", ")}.` };
 }
 
@@ -5223,7 +5223,12 @@ function aplicarPedidosWeb(filas) {
   filas.slice(-300).forEach(w => {
     const id = w && typeof w === "object" ? String(w.id || "") : "";
     if (conocidos.has(id) || conocidos.has("web-" + id)) { yaEstaban++; return; }
-    const pedido = pedidoDesdeFilaWeb(w);
+    // Una fila rara no tiene que frenar a las demás: se salta y se cuenta.
+    let pedido = null;
+    try { pedido = pedidoDesdeFilaWeb(w); } catch (e) {
+      console.log("Fila de pedido web ilegible:", e);
+      if (diagWeb) diagWeb.motivo = String((e && e.message) || e).slice(0, 80);
+    }
     if (!pedido) { descartados++; return; }
     orders.unshift(pedido);
     conocidos.add(pedido.id); conocidos.add(pedido.webId);
