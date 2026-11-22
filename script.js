@@ -5069,24 +5069,56 @@ function textoWebSeguro(valor, max) {
     .slice(0, max);
 }
 
+// Resultado de la última lectura de la planilla, para poder explicarle a Joel
+// qué pasó cuando "no aparece" un pedido (se ve en Resumen → 🌐 Venta web).
+let diagWeb = null; // { cuando, error, filas, nuevos, yaEstaban, descartados }
+
 // Lee la pestaña. Si falla (sin internet, clave mal, la pestaña no existe
 // todavía) devuelve [] sin molestar: el resto de la sincronización sigue igual.
 async function traerPedidosWeb() {
+  diagWeb = { cuando: Date.now(), error: null, filas: 0, nuevos: 0, yaEstaban: 0, descartados: 0 };
   try {
     const resp = await fetchConTimeout(API_URL + "?tipo=pedidos_web", null, 45000);
     const filas = await resp.json();
-    if (!Array.isArray(filas)) return [];
+    if (!Array.isArray(filas)) { diagWeb.error = "formato"; return []; }
     const pedidos = [];
     filas.forEach(f => {
       const texto = Array.isArray(f) ? f[0] : null;
       if (typeof texto !== "string" || texto.charAt(0) !== "{") return;
       try { pedidos.push(JSON.parse(texto)); } catch {}
     });
+    diagWeb.filas = pedidos.length;
     return pedidos;
   } catch (e) {
     console.log("No se pudieron leer los pedidos de la web:", e);
+    diagWeb.error = /clave/i.test(String(e && e.message)) ? "clave" : (e instanceof SyntaxError ? "formato" : "red");
     return [];
   }
+}
+
+// Texto simple de lo que pasó en la última lectura.
+function textoDiagWeb() {
+  if (!diagWeb) return { malo: true, texto: "Todavía no se pudo revisar la planilla (sin conexión, o ya había una sincronización en curso). Probá de nuevo en unos segundos." };
+  const d = diagWeb;
+  const hora = new Date(d.cuando).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", hour12: false });
+  if (d.error === "clave") return { malo: true, texto: `Revisé a las ${hora}: Google rechazó la clave. Revisala en 💾 Backup → 🔑 Clave de Google.` };
+  if (d.error === "red") return { malo: true, texto: `Revisé a las ${hora}: no pude conectarme con Google. Revisá la conexión a internet.` };
+  if (d.error === "formato") return { malo: true, texto: `Revisé a las ${hora}: Google contestó algo que la app no entiende (por ejemplo, una página de error) y no se pudo leer la pestaña pedidos_web. Avisale a Claude.` };
+  if (d.filas === 0) return { malo: false, texto: `Revisé a las ${hora}: la pestaña pedidos_web está vacía (o todavía no existe). Es decir, desde la web no llegó ningún pedido a la planilla. Si ya tendría que haber alguno, revisá que la web esté encendida y hacé un pedido de prueba.` };
+  const partes = [`${d.filas} pedido${d.filas === 1 ? "" : "s"} en la planilla`, `${d.nuevos} nuevo${d.nuevos === 1 ? "" : "s"} para la app`, `${d.yaEstaban} ya estaba${d.yaEstaban === 1 ? "" : "n"} en la app`];
+  if (d.descartados) partes.push(d.descartados === 1 ? "1 no se pudo leer (formato raro)" : `${d.descartados} no se pudieron leer (formato raro)`);
+  return { malo: d.descartados > 0 && d.nuevos === 0 && d.yaEstaban === 0, texto: `Revisé a las ${hora}: ${partes.join(", ")}.` };
+}
+
+async function revisarPedidosWebAhora() {
+  diagWeb = null;
+  // Si justo se está guardando o sincronizando algo, espera a que termine
+  // (como mucho 30 segundos) en vez de rendirse.
+  const inicio = Date.now();
+  while (syncEnCurso && Date.now() - inicio < 30000) await new Promise(r => setTimeout(r, 400));
+  await forzarRecargaDrive();
+  alert("🌐 Pedidos de la web\n\n" + textoDiagWeb().texto);
+  if (vistaActual === "resumen") renderVistaResumen();
 }
 
 // Producto de tu lista que corresponde a un renglón del pedido web. Si la
@@ -5187,15 +5219,17 @@ function aplicarPedidosWeb(filas) {
   if (!Array.isArray(filas) || !filas.length) return 0;
   const conocidos = new Set(orders.map(o => o.webId).concat(orders.map(o => o.id)));
   let nuevos = 0;
+  let yaEstaban = 0, descartados = 0;
   filas.slice(-300).forEach(w => {
     const id = w && typeof w === "object" ? String(w.id || "") : "";
-    if (conocidos.has(id) || conocidos.has("web-" + id)) return;
+    if (conocidos.has(id) || conocidos.has("web-" + id)) { yaEstaban++; return; }
     const pedido = pedidoDesdeFilaWeb(w);
-    if (!pedido) return;
+    if (!pedido) { descartados++; return; }
     orders.unshift(pedido);
     conocidos.add(pedido.id); conocidos.add(pedido.webId);
     nuevos++;
   });
+  if (diagWeb) { diagWeb.nuevos = nuevos; diagWeb.yaEstaban = yaEstaban; diagWeb.descartados = descartados; }
   return nuevos;
 }
 
@@ -5252,6 +5286,11 @@ function renderCardVentaWeb(mesSel, anioSel, mesNombre) {
           <div><div class="stock-nombre">${t.nombre}</div><div class="muted">${formatCurrency(t.total)}</div></div>
           <div class="ventas-cant">${t.cantidad} u</div>
         </div>`).join("") : `<p class="muted" style="margin:8px 0 0;">Todavía no hay ventas web entregadas en ${mesNombre}.</p>`}
+      <div style="margin-top:12px; padding:10px; border-radius:10px; background:${diagWeb && textoDiagWeb().malo ? "#fef2f2" : "#f3f4f6"}; font-size:13px;">
+        <div style="font-weight:600; margin-bottom:2px;">📥 Pedidos que llegan solos de la web</div>
+        <div class="muted">${diagWeb ? textoDiagWeb().texto : "Se revisan solos al abrir la app y cada 2 minutos. Tocá el botón para revisar ahora y ver qué pasó."}</div>
+        <button class="btn-sm btn-outline" style="margin-top:8px;" onclick="revisarPedidosWebAhora()">🔎 Revisar ahora</button>
+      </div>
       <button class="btn-primary btn-full" style="margin-top:10px;" onclick="abrirPedidoWeb()">🌐 Pegar pedido web</button>`;
   }
   return `
